@@ -1,47 +1,89 @@
+//! @author_name    Kristoffer Gronlund
+//! @author_handle  krig
+//! @cart_title     space-shooter
+//! @description    A basic bullet hell side scrolling arcade game
+
+const std = @import("std");
 const cart = @import("cart-api");
 comptime {
     cart.export_start_code();
 }
 
-const WIDTH: i32 = @intCast(cart.screen_width);
-const HEIGHT: i32 = @intCast(cart.screen_height);
+/// Custom panic handler: sends the message via cart.trace() then halts
+/// without @breakpoint() (which causes a silent HardFault and system reset).
+/// The [CART] prefix lets you spot it immediately in the USB console.
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    cart.trace(msg);
+    // Loop without triggering a HardFault so Core 0 has time to print the
+    // trace message before the cart freezes.
+    // Use a low-power wait on ARM, plain spin on other targets (e.g. WASM).
+    while (true) {
+        if (!cart.is_simulator) {
+            asm volatile ("wfe");
+        }
+    }
+}
 
-const MAX_BULLETS = 24;
-const MAX_ENEMY_BULLETS = 16;
-const MAX_ENEMIES = 6;
+const black = defColor(0x000000);
+const white = defColor(0xffffff);
+const zig = defColor(0xF7A41D);
+const red = defColor(0xF82828);
+const green = defColor(0x00FF00);
+const dark_red = defColor(0x010000);
+const dark_green = defColor(0x000100);
+const mandarin_sorbet = defColor(0xfbb040);
+const light = defColor(0x777777);
+const lblue = defColor(0x7777ff);
+const dark = defColor(0x222222);
+const purp = defColor(0x820eef);
+const punk: cart.NeopixelColor = .{ .r = 1, .g = 0, .b = 1 };
+const shipTop = defColor(0xF7A41D);
+const shipBottom = defColor(0x934b17);
+const flash = defColor(0x98ff98);
 
-const Col = struct {
-    pub const bg: cart.DisplayColor = .{ .r = 0, .g = 1, .b = 2 };
-    pub const ship: cart.DisplayColor = .{ .r = 31, .g = 42, .b = 4 };
-    pub const bullet: cart.DisplayColor = .{ .r = 31, .g = 63, .b = 31 };
-    pub const enemy: cart.DisplayColor = .{ .r = 31, .g = 8, .b = 8 };
-    pub const enemy_hit: cart.DisplayColor = .{ .r = 31, .g = 40, .b = 0 };
-    pub const text: cart.DisplayColor = .{ .r = 28, .g = 54, .b = 24 };
-    pub const text_dim: cart.DisplayColor = .{ .r = 10, .g = 20, .b = 10 };
-};
+inline fn defColor(rgb: u24) cart.NeopixelColor {
+    return .{
+        .r = @intCast((rgb >> 16) & 0xff),
+        .g = @intCast((rgb >> 8) & 0xff),
+        .b = @intCast(rgb & 0xff),
+    };
+}
 
-const Mode = enum {
-    intro,
-    game,
-    game_over,
-};
+inline fn blend(from: cart.NeopixelColor, to: cart.NeopixelColor, f: f32) cart.NeopixelColor {
+    const clamped = @min(1.0, @max(0.0, f));
+    return .{
+        .r = @intFromFloat((from.r * (1.0 - clamped)) + (to.r * clamped)),
+        .g = @intFromFloat((from.g * (1.0 - clamped)) + (to.g * clamped)),
+        .b = @intFromFloat((from.b * (1.0 - clamped)) + (to.b * clamped)),
+    };
+}
+
+inline fn rgb565(clr: cart.NeopixelColor) cart.DisplayColor {
+    return .{
+        .r = @intCast(clr.r / 8),
+        .g = @intCast(clr.g / 4),
+        .b = @intCast(clr.b / 8),
+    };
+}
+
+// rand implementation "borrowed" from the blobs cart
+var rand: std.Random.DefaultPrng = undefined;
+fn rand_float() f32 {
+    const byte_count = 2;
+    const UInt = @Int(.unsigned, byte_count * 8);
+    var buf: [byte_count]u8 = undefined;
+    rand.fill(&buf);
+    const r = std.mem.readInt(UInt, &buf, .big);
+    return @as(f32, @floatFromInt(r)) / (@as(f32, 1.0) + @as(f32, std.math.maxInt(UInt)));
+}
 
 const Player = struct {
-    x: i32,
-    y: i32,
-    hp: u8,
-    shot_cd: u8,
-    score: u32,
-    vy: i32,
-};
-
-const Bullet = struct {
-    x: i32,
-    y: i32,
-    dx: i32,
-    dy: i32,
-    alive: bool,
-    hostile: bool,
+    x: f32,
+    y: f32,
+    speed: f32,
+    health: u8,
+    cooldown: u8,
+    score: u8,
 };
 
 const EnemyState = enum {
@@ -51,420 +93,664 @@ const EnemyState = enum {
 };
 
 const Enemy = struct {
-    x: i32,
-    y: i32,
-    vx: i32,
-    hp: u8,
-    cooldown: u8,
-    fire_cd: u8,
-    phase: u8,
     state: EnemyState,
+    x: f32,
+    y: f32,
+    speed: f32,
+    health: u8,
+    cooldown: u8,
 };
 
-var mode: Mode = .intro;
-var rng_state: u32 = 0x1234ABCD;
-var tick_count: u32 = 0;
+const Star = struct {
+    x: f32,
+    y: f32,
+    speed: f32,
+    color: cart.DisplayColor,
+};
+
+const BulletState = enum {
+    dead,
+    dot,
+    cross,
+    ball,
+};
+
+const Bullet = struct {
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    state: BulletState,
+};
+
+var level: u32 = 0;
+var levelTime: u32 = 0;
+var shouldSpawn: u8 = 0;
+const EnemyWidth: f32 = 8;
+const MaxEnemies = 8;
+var enemies: [MaxEnemies]Enemy = undefined;
+const NumStars = 32;
+var starfield: [NumStars]Star = undefined;
 var player: Player = undefined;
-var bullets: [MAX_BULLETS]Bullet = undefined;
-var enemy_bullets: [MAX_ENEMY_BULLETS]Bullet = undefined;
-var enemies: [MAX_ENEMIES]Enemy = undefined;
-var intro_a_released = false;
-var intro_blink: u8 = 0;
-var game_over_a_released = false;
-var game_over_blink: u8 = 0;
-var level: u8 = 0;
-var level_time: u16 = 0;
-var should_spawn: u8 = 0;
+const MaxHealth: u8 = 5;
+const PlayerWidth = 8;
+const MaxBullets = 100;
+var bullets: [MaxBullets]Bullet = undefined;
+var mixer: cart.mixer.Mixer(.{}) = .{};
 
-fn nextRand() u32 {
-    rng_state = rng_state *% 1664525 +% 1013904223;
-    return rng_state;
-}
-
-fn randRange(min_incl: i32, max_incl: i32) i32 {
-    if (max_incl <= min_incl) return min_incl;
-    const span: u32 = @intCast(max_incl - min_incl + 1);
-    return min_incl + @as(i32, @intCast(nextRand() % span));
-}
-
-fn clamp(v: i32, lo: i32, hi: i32) i32 {
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
-}
-
-fn fillScreen(color: cart.DisplayColor) void {
-    const px = cart.Pixel.fromColor(color);
-    for (cart.framebuffer) |*col| {
-        @memset(col, px);
+pub fn start() void {
+    rand = std.Random.DefaultPrng.init(5831);
+    for (&starfield) |*star| {
+        const speed = rand_float();
+        star.* = .{
+            .x = rand_float() * cart.screen_width,
+            .y = rand_float() * cart.screen_height,
+            .speed = speed,
+            .color = rgb565(blend(dark, light, speed)),
+        };
     }
-}
-
-fn fillRect(x: i32, y: i32, w: i32, h: i32, color: cart.DisplayColor) void {
-    if (w <= 0 or h <= 0) return;
-
-    const x0 = clamp(x, 0, WIDTH);
-    const y0 = clamp(y, 0, HEIGHT);
-    const x1 = clamp(x + w, 0, WIDTH);
-    const y1 = clamp(y + h, 0, HEIGHT);
-    if (x0 >= x1 or y0 >= y1) return;
-
-    const px = cart.Pixel.fromColor(color);
-    var xx: i32 = x0;
-    while (xx < x1) : (xx += 1) {
-        @memset(cart.framebuffer[@intCast(xx)][@intCast(y0)..@intCast(y1)], px);
-    }
-}
-
-fn overlapRect(ax: i32, ay: i32, aw: i32, ah: i32, bx: i32, by: i32, bw: i32, bh: i32) bool {
-    return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by;
-}
-
-fn resetRun() void {
-    tick_count = 0;
-    level = 0;
-    level_time = 0;
-    should_spawn = 1;
-    player = .{ .x = 14, .y = HEIGHT / 2 - 4, .hp = 5, .shot_cd = 0, .score = 0, .vy = 0 };
-
-    for (&bullets) |*b| b.* = .{ .x = 0, .y = 0, .dx = 0, .dy = 0, .alive = false, .hostile = false };
-    for (&enemy_bullets) |*b| b.* = .{ .x = 0, .y = 0, .dx = 0, .dy = 0, .alive = false, .hostile = true };
-    for (&enemies) |*e| e.* = .{ .x = 0, .y = 0, .vx = 0, .hp = 0, .cooldown = 0, .fire_cd = 0, .phase = 0, .state = .dead };
-}
-
-fn spawnEnemy(slot: usize) void {
-    const hp_boost: i32 = @min(@divTrunc(@as(i32, level), 4), 1);
-    enemies[slot] = .{
-        .x = WIDTH + randRange(0, 40),
-        .y = randRange(8, HEIGHT - 18),
-        .vx = randRange(1, 2),
-        .hp = @intCast(randRange(1, 2) + hp_boost),
+    for (&enemies) |*enemy| enemy.state = .dead;
+    for (&bullets) |*bullet| bullet.state = .dead;
+    player = .{
+        .x = 8.0,
+        .y = cart.screen_height / 2,
+        .speed = 0.0,
+        .health = MaxHealth,
         .cooldown = 0,
-        .fire_cd = 0,
-        .phase = @intCast(nextRand() & 31),
-        .state = .live,
+        .score = 0,
     };
+
+    // Enable vsync but tune the framerate to be as fast as possible for the app timing
+    cart.set_vsync_dynamic();
+
+    // Use the OS to clear every frame to black before it gets to the cart
+    cart.set_double_buffer_mode(.{ .clear_full_frame = rgb565(black) });
+
+    mixer.start_audio();
 }
 
-fn fireBullet() void {
+fn tick_stars() void {
+    for (&starfield) |*star| {
+        var x = star.x - star.speed * 2.0;
+        if (x < 0.0) x = @floatFromInt(cart.screen_width);
+        star.x = x;
+    }
+}
+
+fn draw_stars() void {
+    const shaky = (player.y / cart.screen_height) * -15.0;
+    for (&starfield) |*star| {
+        cart.hline(.{
+            .x = @intFromFloat(star.x),
+            .y = @intFromFloat(star.y + shaky * star.speed),
+            .len = @intFromFloat(star.speed * 4.0 + 1.0),
+            .color = star.color,
+        });
+    }
+}
+
+fn noisy(freq: f32, len: f32, vol: u8, channel: u8) void {
+    if (quietMode) return;
+    mixer.tone(.{
+        .frequency = .hz(@intFromFloat(freq + 0.5)),
+        .duration = .seconds(len - 0.04),
+        .volume = vol,
+        .flags = .{
+            .channel = @fromBackingInt(@intCast(channel)),
+        },
+    });
+}
+
+fn spawn_bullet(bullet: Bullet) void {
     for (&bullets) |*b| {
-        if (!b.alive) {
-            b.* = .{ .x = player.x + 8, .y = player.y + 3, .dx = 4, .dy = 0, .alive = true, .hostile = false };
-            return;
+        if (b.state != .dead) continue;
+        b.* = bullet;
+        if (bullet.state == .dot) {
+            noisy(880.0, 0.1, 100, 0);
+        } else {
+            noisy(440.0, 0.08, 50, 0);
+        }
+        break;
+    }
+}
+
+fn tick_bullets() void {
+    if (cart.controls.a) {
+        if (player.cooldown > 0) {
+            player.cooldown -= 1;
+        } else {
+            player.cooldown = 4;
+            spawn_bullet(.{
+                .x = player.x + 7.0 + (rand_float() - 0.5) * 3.0,
+                .y = player.y + (rand_float() - 0.5),
+                .dx = 3.0 + (rand_float() * 0.2),
+                .dy = 0.5 * (rand_float() - 0.5),
+                .state = .dot,
+            });
+        }
+    }
+    for (&bullets) |*bullet| {
+        if (bullet.state == .dead) continue;
+        bullet.x += bullet.dx;
+        bullet.y += bullet.dy;
+        if (bullet.x > cart.screen_width or
+            bullet.y > cart.screen_height or
+            bullet.x < 0 or
+            bullet.y < 0) bullet.state = .dead;
+    }
+}
+
+fn draw_bullets() void {
+    cart.trace("ss:draw-b");
+    for (&bullets) |*bullet| {
+        switch (bullet.state) {
+            .dot => {
+                cart.rect(.{
+                    .x = @intFromFloat(bullet.x),
+                    .y = @intFromFloat(bullet.y),
+                    .width = 2,
+                    .height = 2,
+                    .stroke_color = rgb565(white),
+                    .fill_color = rgb565(white),
+                });
+            },
+            .cross => {
+                cart.hline(.{
+                    .x = @intFromFloat(bullet.x - 1),
+                    .y = @intFromFloat(bullet.y),
+                    .len = 3,
+                    .color = rgb565(lblue),
+                });
+                cart.vline(.{
+                    .x = @intFromFloat(bullet.x),
+                    .y = @intFromFloat(bullet.y - 1),
+                    .len = 3,
+                    .color = rgb565(lblue),
+                });
+            },
+            else => {},
         }
     }
 }
 
-fn fireEnemyBullet(ex: i32, ey: i32) void {
-    for (&enemy_bullets) |*b| {
-        if (!b.alive) {
-            b.* = .{
-                .x = ex - 1,
-                .y = ey + 3,
-                .dx = -2 - @as(i32, @intCast(@min(level / 4, 1))),
-                .dy = randRange(-1, 1),
-                .alive = true,
-                .hostile = true,
-            };
-            return;
+fn tick_player() void {
+    if (cart.controls.up) {
+        player.speed = @max(-3.0, player.speed - 0.2);
+    }
+    if (cart.controls.down) {
+        player.speed = @min(3.0, player.speed + 0.2);
+    }
+    if (!cart.controls.up and !cart.controls.down) {
+        player.speed = player.speed * 0.66;
+    }
+    player.y = player.y + player.speed;
+    if (player.y < 8.0) {
+        player.y = 8.0;
+        player.speed = 0.0;
+    }
+    if (player.y > @as(f32, cart.screen_height) - 8.0) {
+        player.y = @as(f32, cart.screen_height) - 8.0;
+        player.speed = 0.0;
+    }
+}
+
+fn draw_player() void {
+    cart.trace("ss:draw-p");
+    const speed = player.speed;
+    const xpos: i32 = @intFromFloat(player.x - @as(f32, @floatFromInt(player.cooldown)) * 0.5);
+    if (speed < -0.1) {
+        cart.rect(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y),
+            .width = 8,
+            .height = 2,
+            .stroke_color = rgb565(shipBottom),
+            .fill_color = rgb565(shipBottom),
+        });
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y - 1),
+            .len = 3,
+            .color = rgb565(shipBottom),
+        });
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y - 2),
+            .len = 1,
+            .color = rgb565(shipBottom),
+        });
+    } else if (speed > 0.1) {
+        cart.rect(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y),
+            .width = 8,
+            .height = 2,
+            .stroke_color = rgb565(shipTop),
+            .fill_color = rgb565(shipTop),
+        });
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y + 2),
+            .len = 3,
+            .color = rgb565(shipTop),
+        });
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y + 3),
+            .len = 1,
+            .color = rgb565(shipTop),
+        });
+    } else {
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y),
+            .len = 8.0,
+            .color = rgb565(shipTop),
+        });
+        cart.hline(.{
+            .x = xpos,
+            .y = @intFromFloat(player.y + 1),
+            .len = 8.0,
+            .color = rgb565(shipBottom),
+        });
+    }
+
+    const r = rand_float();
+    if (r > 0.2) {
+        cart.hline(.{
+            .x = xpos - @as(i32, @intFromFloat(r * 6.0)),
+            .y = @intFromFloat(player.y + r + 0.2),
+            .len = @intFromFloat(r * 5.0),
+            .color = rgb565(flash),
+        });
+    }
+
+    // draw health with neopixels
+    for (cart.neopixels, 0..) |*np, i| {
+        if (player.health > i) {
+            np.* = dark_green;
+        } else {
+            np.* = dark_red;
         }
     }
 }
 
-fn activeEnemies() u8 {
-    var n: u8 = 0;
-    for (enemies) |e| {
-        if (e.state != .dead) n += 1;
-    }
-    return n;
+fn reset_game() void {
+    level = 0;
+    levelTime = 0;
+    shouldSpawn = 0;
+    for (&enemies) |*slot| slot.state = .dead;
+    for (&bullets) |*slot| slot.state = .dead;
+    player.health = MaxHealth;
+    player.cooldown = 0;
+    player.score = 0;
 }
 
-fn allEnemiesCleared() bool {
-    for (enemies) |e| {
-        if (e.state != .dead) return false;
+fn spawn_enemy(enemy: Enemy) void {
+    for (&enemies) |*slot| {
+        if (slot.state == .dead) {
+            slot.* = enemy;
+            break;
+        }
+    }
+}
+
+fn level_cleared() bool {
+    for (enemies) |enemy| {
+        if (enemy.state != .dead) {
+            return false;
+        }
     }
     return true;
 }
 
-fn tickGame() void {
-    tick_count +%= 1;
-    level_time +%= 1;
-
-    if (cart.controls.up) player.vy -= 1;
-    if (cart.controls.down) player.vy += 1;
-    if (!cart.controls.up and !cart.controls.down) {
-        if (player.vy > 0) player.vy -= 1;
-        if (player.vy < 0) player.vy += 1;
-    }
-    player.vy = clamp(player.vy, -3, 3);
-    player.y += player.vy;
-    player.y = clamp(player.y, 4, HEIGHT - 12);
-
-    if (player.shot_cd > 0) player.shot_cd -= 1;
-    if (cart.controls.a and player.shot_cd == 0) {
-        fireBullet();
-        player.shot_cd = 5;
+fn tick_enemies() void {
+    levelTime +%= 1;
+    if (levelTime > 100 and level_cleared()) {
+        levelTime = 0;
+        level += 1;
+        shouldSpawn = @min(level, MaxEnemies);
     }
 
-    for (&bullets) |*b| {
-        if (!b.alive) continue;
-        b.x += b.dx;
-        b.y += b.dy;
-        if (b.x >= WIDTH + 2 or b.y < -2 or b.y > HEIGHT + 2) b.alive = false;
+    // spawn enemies
+    if ((levelTime > 0 and (levelTime % 50) == 0) and (shouldSpawn > 0)) {
+        spawn_enemy(.{
+            .state = .live,
+            .x = cart.screen_width,
+            .y = (0.2 + rand_float() * 0.8) * cart.screen_height,
+            .speed = 0.8,
+            .health = 1,
+            .cooldown = 0,
+        });
+        shouldSpawn -= 1;
     }
 
-    for (&enemy_bullets) |*b| {
-        if (!b.alive) continue;
-        b.x += b.dx;
-        b.y += b.dy;
-        if (b.x < -3 or b.y < -3 or b.y > HEIGHT + 3) {
-            b.alive = false;
-            continue;
-        }
-        if (overlapRect(b.x, b.y, 3, 3, player.x, player.y, 9, 8)) {
-            b.alive = false;
-            if (player.hp > 0) player.hp -= 1;
-        }
-    }
-
-    if (level_time > 100 and should_spawn == 0 and allEnemiesCleared()) {
-        level +%= 1;
-        level_time = 0;
-        should_spawn = @intCast(@min(@as(i32, MAX_ENEMIES), @as(i32, @intCast(level))));
-    }
-
-    if (level_time > 0 and (level_time % 50) == 0 and should_spawn > 0 and activeEnemies() < MAX_ENEMIES) {
-        for (&enemies, 0..) |*e, i| {
-            if (e.state == .dead) {
-                spawnEnemy(i);
-                should_spawn -= 1;
-                break;
-            }
-        }
-    }
-
-    for (&enemies) |*e| {
-        switch (e.state) {
-            .dead => {},
-            .dying => {
-                if (e.cooldown < 20) {
-                    e.cooldown += 1;
-                } else {
-                    e.state = .dead;
-                }
-            },
+    for (&enemies) |*enemy| {
+        switch (enemy.state) {
             .live => {
-                e.phase +%= 1;
-                e.x -= e.vx;
+                const hw: f32 = EnemyWidth * 0.5;
+                const hh: f32 = EnemyWidth * 0.5;
 
-                if ((tick_count & 3) == 0) {
-                    if (e.phase < 16) {
-                        e.y -= 1;
-                    } else {
-                        e.y += 1;
-                    }
-                }
-                e.y = clamp(e.y, 6, HEIGHT - 14);
-
-                if (e.x < -12) {
-                    e.state = .dead;
-                } else {
-                    for (&bullets) |*b| {
-                        if (!b.alive) continue;
-                        if (overlapRect(b.x, b.y, 2, 2, e.x, e.y, 10, 8)) {
-                            b.alive = false;
-                            if (e.hp > 1) {
-                                e.hp -= 1;
-                            } else {
-                                e.state = .dying;
-                                e.cooldown = 0;
+                // move enemy
+                enemy.x = enemy.x - enemy.speed;
+                enemy.y = enemy.y + std.math.sin(@as(f32, @floatFromInt(levelTime % 100)) * 0.01) * 0.1;
+                // collide with bullets
+                for (&bullets) |*bullet| {
+                    if (bullet.state == .dot) {
+                        if (bullet.x < enemy.x + hw and bullet.x > enemy.x - hw) {
+                            if (bullet.y < enemy.y + hh and bullet.y > enemy.y - hh) {
+                                bullet.state = .dead;
+                                enemy.state = .dying;
+                                enemy.cooldown = 1;
                                 player.score += 1;
+                                noisy(440.0, 0.2, 100, 3);
+                                continue;
                             }
-                            break;
                         }
                     }
-
-                    if (e.state == .live and overlapRect(player.x, player.y, 9, 8, e.x, e.y, 10, 8)) {
-                        e.state = .dying;
-                        e.cooldown = 0;
-                        if (player.hp > 0) player.hp -= 1;
-                    }
-
-                    if (e.fire_cd > 0) e.fire_cd -= 1;
-                    if (e.state == .live and level >= 2 and e.fire_cd == 0 and (nextRand() & 63) == 0) {
-                        fireEnemyBullet(e.x, e.y);
-                        e.fire_cd = 18;
+                }
+                // collide with player
+                if (enemy.x - hw < player.x + PlayerWidth and enemy.x + hw > player.x) {
+                    if (enemy.y - hh < player.y + 1 and enemy.y + hh > player.y - 1) {
+                        enemy.state = .dying;
+                        enemy.cooldown = 1;
+                        if (player.health > 0) {
+                            player.health -= 1;
+                            player.score = 0;
+                            noisy(220.0, 0.2, 80, 1);
+                        } else {
+                            noisy(440.0, 0.2, 100, 3);
+                        }
                     }
                 }
-            },
-        }
-    }
 
-    if (player.hp == 0) {
-        mode = .game_over;
-        game_over_a_released = false;
-        game_over_blink = 0;
-    }
-}
+                if (level > 1 and rand_float() > 0.975) {
+                    spawn_bullet(.{
+                        .x = enemy.x - 5.0,
+                        .y = enemy.y + (EnemyWidth / 2),
+                        .dx = -0.8 - (rand_float() * 0.5),
+                        .dy = 0.5 * (rand_float() - 0.5),
+                        .state = .cross,
+                    });
+                }
 
-fn drawHud() void {
-    var i: u8 = 0;
-    while (i < 5) : (i += 1) {
-        const on = i < player.hp;
-        fillRect(4 + @as(i32, i) * 6, 4, 4, 3, if (on) Col.text else Col.text_dim);
-    }
-
-    var buf: [24]u8 = undefined;
-    const s = stdfmt(player.score, &buf);
-    cart.text(.{ .str = s, .x = WIDTH - 52, .y = 2, .text_color = Col.text });
-
-    var wave_buf: [16]u8 = undefined;
-    const wave_s = u8fmt(level, &wave_buf);
-    cart.text(.{ .str = "W", .x = WIDTH - 52, .y = 12, .text_color = Col.text_dim });
-    cart.text(.{ .str = wave_s, .x = WIDTH - 44, .y = 12, .text_color = Col.text });
-
-    if (level_time < 64 and level > 1 and (tick_count & 8) == 0) {
-        cart.text(.{ .str = "NEW WAVE", .x = @divTrunc(WIDTH - 64, 2), .y = @divTrunc(HEIGHT - 8, 2), .text_color = Col.text_dim });
-    }
-}
-
-fn stdfmt(v: u32, buf: *[24]u8) []const u8 {
-    var tmp: [24]u8 = undefined;
-    var n = v;
-    var len: usize = 0;
-    if (n == 0) {
-        buf[0] = '0';
-        return buf[0..1];
-    }
-    while (n > 0) : (n /= 10) {
-        tmp[len] = @as(u8, @intCast('0' + (n % 10)));
-        len += 1;
-    }
-    var i: usize = 0;
-    while (i < len) : (i += 1) {
-        buf[i] = tmp[len - 1 - i];
-    }
-    return buf[0..len];
-}
-
-fn u8fmt(v: u8, buf: *[16]u8) []const u8 {
-    var tmp: [16]u8 = undefined;
-    var n: u32 = v;
-    var len: usize = 0;
-    if (n == 0) {
-        buf[0] = '0';
-        return buf[0..1];
-    }
-    while (n > 0) : (n /= 10) {
-        tmp[len] = @as(u8, @intCast('0' + (n % 10)));
-        len += 1;
-    }
-    var i: usize = 0;
-    while (i < len) : (i += 1) {
-        buf[i] = tmp[len - 1 - i];
-    }
-    return buf[0..len];
-}
-
-fn drawGame() void {
-    fillScreen(Col.bg);
-
-    // Ship body
-    fillRect(player.x, player.y, 9, 8, Col.ship);
-    fillRect(player.x - 2, player.y + 2, 2, 4, Col.ship);
-
-    for (&bullets) |*b| {
-        if (!b.alive) continue;
-        fillRect(b.x, b.y, 2, 2, Col.bullet);
-    }
-
-    for (&enemy_bullets) |*b| {
-        if (!b.alive) continue;
-        fillRect(b.x - 1, b.y, 3, 1, Col.enemy_hit);
-        fillRect(b.x, b.y - 1, 1, 3, Col.enemy_hit);
-    }
-
-    for (&enemies) |*e| {
-        switch (e.state) {
-            .dead => {},
-            .live => {
-                fillRect(e.x, e.y, 10, 8, Col.enemy);
-                fillRect(e.x + 2, e.y + 2, 2, 2, Col.bg);
-                fillRect(e.x + 6, e.y + 2, 2, 2, Col.bg);
+                // remove enemy when exiting the screen
+                if (enemy.x < -4.0) enemy.state = .dead;
             },
             .dying => {
-                const sz = @as(i32, 2) + @divTrunc(@as(i32, e.cooldown), 3);
-                fillRect(e.x + 5 - sz, e.y + 4 - sz, sz * 2, sz * 2, Col.enemy_hit);
+                enemy.cooldown += 1;
+                if (enemy.cooldown > 16) {
+                    enemy.state = .dead;
+                }
             },
+            else => {},
         }
     }
-
-    drawHud();
 }
 
-fn tickIntro() void {
-    intro_blink +%= 1;
-    if (!cart.controls.a) intro_a_released = true;
-    if (intro_a_released and cart.controls.a) {
-        resetRun();
-        mode = .game;
+fn draw_enemies() void {
+    cart.trace("ss:draw-e");
+    for (&enemies) |*enemy| {
+        if (enemy.state == .dead) continue;
+        if (enemy.state == .dying) {
+            cart.trace("ss:dying-oval");
+            const hw: f32 = @as(f32, @floatFromInt(enemy.cooldown * 2)) * 0.5;
+            cart.oval(.{
+                .x = @intFromFloat(enemy.x - hw),
+                .y = @intFromFloat(enemy.y - hw),
+                .width = enemy.cooldown * 2,
+                .height = enemy.cooldown * 2,
+                .stroke_color = rgb565(red),
+                .fill_color = rgb565(white),
+            });
+        }
+        const colors = [_]cart.NeopixelColor{ mandarin_sorbet, purp, green, zig };
+        const clr = rgb565(colors[level % colors.len]);
+        if (enemy.state == .live) {
+            cart.trace("ss:live");
+            cart.hline(.{
+                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
+                .y = @intFromFloat(enemy.y + EnemyWidth / 2 - 1),
+                .len = EnemyWidth,
+                .color = clr,
+            });
+            cart.hline(.{
+                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
+                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
+                .len = EnemyWidth,
+                .color = clr,
+            });
+            cart.vline(.{
+                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
+                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
+                .len = 3,
+                .color = rgb565(red),
+            });
+            cart.vline(.{
+                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
+                .y = @intFromFloat(enemy.y + EnemyWidth / 2 - 3),
+                .len = 3,
+                .color = rgb565(red),
+            });
+            cart.rect(.{
+                .x = @intFromFloat(enemy.x + 2),
+                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
+                .width = 6,
+                .height = EnemyWidth,
+                .fill_color = clr,
+            });
+            cart.trace("ss:live-oval");
+            cart.oval(.{
+                .x = @intFromFloat(enemy.x),
+                .y = @intFromFloat(enemy.y - 3),
+                .width = 6,
+                .height = 6,
+                .fill_color = rgb565(black),
+            });
+            cart.trace("ss:oval-ok");
+        }
     }
 }
 
-fn tickGameOver() void {
-    game_over_blink +%= 1;
-    if (!cart.controls.a) game_over_a_released = true;
-    if (game_over_a_released and cart.controls.a) {
-        intro_a_released = false;
-        intro_blink = 0;
-        mode = .intro;
+fn draw_level() void {
+    cart.trace("ss:draw-l");
+    if (player.score > 0) {
+        var text: [32]u8 = undefined;
+        const txt = std.fmt.bufPrintSentinel(&text, "{}", .{player.score}, 0) catch "-";
+        cart.text(.{
+            .str = txt,
+            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
+            .y = 4,
+            .text_color = rgb565(white),
+        });
+    }
+
+    if (level > 0 and levelTime < 100 and rand_float() < 0.5) {
+        const txt = "NEW WAVE";
+        cart.text(.{
+            .str = txt,
+            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
+            .y = @intCast((cart.screen_height - cart.font_height) / 2),
+            .text_color = rgb565(red),
+        });
     }
 }
 
-fn drawIntro() void {
-    fillScreen(Col.bg);
-    cart.text(.{ .str = "SPACE SHOOTER V2", .x = 20, .y = 40, .text_color = Col.text });
-    cart.text(.{ .str = "OS Compatible", .x = 30, .y = 52, .text_color = Col.text_dim });
+const bannerText = "sycl 2024";
+const bannerWidth = cart.font_width * bannerText.len;
+var bannerPos: f32 = cart.screen_width / 2;
 
-    if ((intro_blink / 24) % 2 == 0) {
-        cart.text(.{ .str = "PRESS A TO START", .x = 24, .y = 78, .text_color = Col.text });
+fn draw_banner() void {
+    cart.trace("ss:draw-bn");
+    cart.text(.{
+        .str = bannerText,
+        .x = @intFromFloat(bannerPos),
+        .y = cart.screen_height - 12,
+        .text_color = rgb565(light),
+    });
+    bannerPos -= 0.233;
+    if (bannerPos < -@as(f32, @floatFromInt(bannerWidth)))
+        bannerPos = cart.screen_width;
+}
+
+const GameState = enum {
+    intro,
+    game,
+    game_over,
+};
+var gameState: GameState = .intro;
+
+const introText = &[_][]const u8{
+    "SPACE",
+    "SHOOTER",
+    "",
+    "by @krig",
+    "",
+    "Press START",
+};
+const spacing = (cart.font_height * 4 / 3);
+var shakex: [introText.len]i32 = @splat(0);
+var shakey: [introText.len]i32 = @splat(0);
+
+fn draw_intro_text() void {
+    const y_start = (cart.screen_height - (cart.font_height + spacing * (introText.len - 1))) / 2;
+    if (rand_float() < 0.1) {
+        for (shakex, 0..) |_, i| {
+            shakex[i] = @intFromFloat(rand_float() * 8.0);
+            shakey[i] = @intFromFloat(rand_float() * 4.0);
+        }
+    }
+    for (introText, 0..) |line, i| {
+        const flicker = rand_float() < 0.2;
+        if (!flicker) {
+            cart.text(.{
+                .str = line,
+                .x = @as(i32, @intCast((cart.screen_width - cart.font_width * line.len) / 2)) + shakex[i],
+                .y = @as(i32, @intCast(y_start + spacing * i)) + shakey[i],
+                .text_color = rgb565(zig),
+            });
+        }
     }
 }
 
-fn drawGameOver() void {
-    fillScreen(Col.bg);
-    cart.text(.{ .str = "GAME OVER", .x = 44, .y = 48, .text_color = Col.enemy_hit });
+var stateTick: u16 = 0;
+var pixelTick: u8 = 0;
+var quietMode: bool = false;
+var select_held_frames: u8 = 0; // Debounce: require SELECT held to reset from game
 
-    var buf: [24]u8 = undefined;
-    const s = stdfmt(player.score, &buf);
-    cart.text(.{ .str = "SCORE", .x = 50, .y = 62, .text_color = Col.text_dim });
-    cart.text(.{ .str = s, .x = 90, .y = 62, .text_color = Col.text });
-
-    if ((game_over_blink / 24) % 2 == 0) {
-        cart.text(.{ .str = "PRESS A", .x = 56, .y = 80, .text_color = Col.text });
-    }
-}
-
-pub fn start() void {
-    rng_state = 0xC001D00D;
-    mode = .intro;
-    intro_a_released = false;
-    intro_blink = 0;
-}
+// Diagnostic frame counter for crash-location tracing.
+// Every 30 frames we send "ss:F=NNN" via cart.trace() while in game mode.
+// draw_enemies() also sends a trace before each complex drawing operation
+// so the last [CART] message visible in the console before the crash/[PANIC]
+// pinpoints the crash location.
+var diag_frame: u32 = 0;
 
 pub fn update() void {
-    switch (mode) {
-        .intro => {
-            tickIntro();
-            drawIntro();
-        },
-        .game => {
-            tickGame();
-            drawGame();
-        },
-        .game_over => {
-            tickGameOver();
-            drawGameOver();
-        },
+    if (stateTick > 1000) stateTick = 100;
+    stateTick +%= 1;
+
+    if (stateTick % 10 == 0) pixelTick += 1;
+    if (pixelTick > 4) pixelTick = 0;
+
+    if (cart.controls.select and cart.controls.up) {
+        quietMode = false;
     }
+    if (cart.controls.select and cart.controls.down) {
+        quietMode = true;
+    }
+    if (gameState == .intro) {
+        tick_stars();
+        draw_stars();
+        draw_intro_text();
+        // Accept START after ~10 frames (~166ms) instead of 50 - avoids feeling unresponsive
+        if (stateTick > 10 and cart.controls.start) {
+            gameState = .game;
+            stateTick = 0;
+        }
+
+        for (cart.neopixels, 0..) |*np, i| {
+            if (quietMode) {
+                np.* = if (pixelTick == i) punk else black;
+            } else {
+                np.* = if (pixelTick == i) blend(black, zig, 0.05) else black;
+            }
+        }
+    } else if (gameState == .game_over) {
+        tick_stars();
+        draw_stars();
+        const gameOver = "GAME OVER";
+        if (rand_float() < 0.8) {
+            cart.text(.{
+                .str = gameOver,
+                .x = (cart.screen_width - gameOver.len * cart.font_width) / 2,
+                .y = (cart.screen_height - cart.font_height) / 2,
+                .text_color = rgb565(red),
+            });
+        }
+        if (stateTick > 10 and cart.controls.start) {
+            reset_game();
+            gameState = .intro;
+            stateTick = 0;
+        }
+        for (cart.neopixels) |*np| {
+            if (rand_float() > 0.8) {
+                np.* = black;
+            } else if (rand_float() > 0.8) {
+                np.* = dark_red;
+            }
+        }
+    } else {
+        // SELECT+DOWN = intentional reset (avoids accidental resets from SELECT noise).
+        // SELECT alone no longer resets - was causing rapid resets to intro screen.
+        if (stateTick > 60 and cart.controls.select and cart.controls.down) {
+            select_held_frames +%= 1;
+        } else {
+            select_held_frames = 0;
+        }
+        if (select_held_frames >= 20) {
+            reset_game();
+            gameState = .intro;
+            stateTick = 0;
+            select_held_frames = 0;
+        }
+
+        // Periodic heartbeat every 30 frames (~0.5s at 60fps).
+        // If the crash happens DURING tick_game(), the last [CART] message
+        // will be "ss:tick".  If inside draw_enemies(), it will be "ss:draw-e",
+        // "ss:live", "ss:live-oval", or "ss:dying-oval".
+        diag_frame +%= 1;
+        if (diag_frame % 30 == 0) {
+            cart.trace("ss:tick");
+        }
+
+        tick_game();
+        if (player.health == 0) {
+            gameState = .game_over;
+            stateTick = 0;
+            return;
+        }
+        draw_game();
+    }
+
+    mixer.update();
+}
+
+fn tick_game() void {
+    cart.trace("ss:tg-stars");
+    tick_stars();
+    cart.trace("ss:tg-bullets");
+    tick_bullets();
+    cart.trace("ss:tg-enemies");
+    tick_enemies();
+    cart.trace("ss:tg-player");
+    tick_player();
+}
+
+fn draw_game() void {
+    draw_stars();
+    draw_enemies();
+    draw_player();
+    draw_bullets();
+    draw_level();
+    draw_banner();
 }
