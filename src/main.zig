@@ -1,7 +1,7 @@
-//! @author_name    Kristoffer Gronlund
-//! @author_handle  krig
-//! @cart_title     space-shooter
-//! @description    A basic bullet hell side scrolling arcade game
+//! @author_name    Cameron Knight
+//! @author_handle  CamoKnight117
+//! @cart_title     sycl-snake
+//! @description    A snake game made for the SYCL Vancouver 2026 badge
 
 const std = @import("std");
 const cart = @import("cart-api");
@@ -26,21 +26,15 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
 const black = defColor(0x000000);
 const white = defColor(0xffffff);
-const zig = defColor(0xF7A41D);
-const red = defColor(0xF82828);
-const green = defColor(0x00FF00);
-const dark_red = defColor(0x010000);
-const dark_green = defColor(0x000100);
-const mandarin_sorbet = defColor(0xfbb040);
-const light = defColor(0x777777);
-const lblue = defColor(0x7777ff);
-const dark = defColor(0x222222);
-const purp = defColor(0x820eef);
-const punk: cart.NeopixelColor = .{ .r = 1, .g = 0, .b = 1 };
-const shipTop = defColor(0xF7A41D);
-const shipBottom = defColor(0x934b17);
-const flash = defColor(0x98ff98);
+const grey = defColor(0x777777);
+const red = defColor(0xf82828);
+//const dred = defColor(0x3e0000);
+const green = defColor(0x00ff00);
+const dgreen = defColor(0x003c00);
+const blue = defColor(0x7777ff);
+//const purp = defColor(0x820eef);
 
+//fn borrowed from space-shooter cart
 inline fn defColor(rgb: u24) cart.NeopixelColor {
     return .{
         .r = @intCast((rgb >> 16) & 0xff),
@@ -49,6 +43,7 @@ inline fn defColor(rgb: u24) cart.NeopixelColor {
     };
 }
 
+//fn borrowed from space-shooter cart
 inline fn blend(from: cart.NeopixelColor, to: cart.NeopixelColor, f: f32) cart.NeopixelColor {
     const clamped = @min(1.0, @max(0.0, f));
     return .{
@@ -58,6 +53,7 @@ inline fn blend(from: cart.NeopixelColor, to: cart.NeopixelColor, f: f32) cart.N
     };
 }
 
+//fn borrowed from space-shooter cart
 inline fn rgb565(clr: cart.NeopixelColor) cart.DisplayColor {
     return .{
         .r = @intCast(clr.r / 8),
@@ -77,88 +73,101 @@ fn rand_float() f32 {
     return @as(f32, @floatFromInt(r)) / (@as(f32, 1.0) + @as(f32, std.math.maxInt(UInt)));
 }
 
-const Player = struct {
-    x: f32,
-    y: f32,
-    speed: f32,
-    health: u8,
-    cooldown: u8,
-    score: u8,
+const Coordinate = struct {
+    x: u8,
+    y: u8,
 };
 
-const EnemyState = enum {
-    dead,
-    live,
-    dying,
+const Direction = enum {
+    up,
+    down,
+    left,
+    right,
 };
 
-const Enemy = struct {
-    state: EnemyState,
-    x: f32,
-    y: f32,
-    speed: f32,
-    health: u8,
-    cooldown: u8,
+const Vector = struct {
+    origin: Coordinate,
+    direction: Direction,
 };
 
-const Star = struct {
-    x: f32,
-    y: f32,
-    speed: f32,
-    color: cart.DisplayColor,
+const Snake = struct {
+    head_coord: Coordinate,
+    tail_coord: Coordinate,
+    body_len: u8,
+    color_1: cart.NeopixelColor,
+    color_2: cart.NeopixelColor,
+    color_eyes: cart.NeopixelColor,
+    current_direction: Direction,
+    score: u16,
 };
 
-const BulletState = enum {
-    dead,
-    dot,
-    cross,
-    ball,
+const Pip = struct {
+    color_1: cart.NeopixelColor = white,
+    color_2: cart.NeopixelColor = white,
+    size: u8 = 3,
 };
 
-const Bullet = struct {
-    x: f32,
-    y: f32,
-    dx: f32,
-    dy: f32,
-    state: BulletState,
+const Wall = struct {
+    color_1: cart.NeopixelColor = white,
+    color_2: cart.NeopixelColor = grey,
+    //Other types necessary for walls? Thickness? Sprite?
 };
 
-var level: u32 = 0;
-var levelTime: u32 = 0;
-var shouldSpawn: u8 = 0;
-const EnemyWidth: f32 = 8;
-const MaxEnemies = 8;
-var enemies: [MaxEnemies]Enemy = undefined;
-const NumStars = 32;
-var starfield: [NumStars]Star = undefined;
-var player: Player = undefined;
-const MaxHealth: u8 = 5;
-const PlayerWidth = 8;
-const MaxBullets = 100;
-var bullets: [MaxBullets]Bullet = undefined;
+const MovementResult = enum {
+    collision,
+    collected_pip,
+    normal,
+    err,
+};
+
+const MapLocationType = enum {
+    empty,
+    wall,
+    snake_head,
+    snake_body_up,
+    snake_body_down,
+    snake_body_left,
+    snake_body_right,
+    pip,
+};
+
+const map_width: u32 = 32; //map width in grid squares
+const map_height: u32 = 25; //map height in grid squares
+const map_size = map_width * map_height; //total grid squares
+const gridsquare_width: u32 = 5; //pixel width of grid squares
+// const start_pips = 2;
+// const max_pips = 10;
+var snake_1: Snake = undefined;
+
+// var snake_2: Snake = undefined;
+// var pips: [max_pips]Pip = undefined;
+var map_grid: [map_width][map_height]MapLocationType = undefined;
+var wall: Wall = undefined;
+var pip: Pip = undefined;
+
 var mixer: cart.mixer.Mixer(.{}) = .{};
 
 pub fn start() void {
     rand = std.Random.DefaultPrng.init(5831);
-    for (&starfield) |*star| {
-        const speed = rand_float();
-        star.* = .{
-            .x = rand_float() * cart.screen_width,
-            .y = rand_float() * cart.screen_height,
-            .speed = speed,
-            .color = rgb565(blend(dark, light, speed)),
-        };
-    }
-    for (&enemies) |*enemy| enemy.state = .dead;
-    for (&bullets) |*bullet| bullet.state = .dead;
-    player = .{
-        .x = 8.0,
-        .y = cart.screen_height / 2,
-        .speed = 0.0,
-        .health = MaxHealth,
-        .cooldown = 0,
+
+    map_grid = std.mem.zeroes([map_width][map_height]MapLocationType);
+    addWallsToMap();
+    addStartingPipsToMap();
+
+    snake_1 = .{
+        .head_coord = .{ .x = 16, .y = 12 },
+        .tail_coord = .{ .x = 16, .y = 14 },
+        .body_len = 3,
+        .color_1 = green,
+        .color_2 = dgreen,
+        .color_eyes = red,
+        .current_direction = .up,
         .score = 0,
     };
+    addSnakeToMap();
+
+    wall = .{};
+    pip = .{};
 
     // Enable vsync but tune the framerate to be as fast as possible for the app timing
     cart.set_vsync_dynamic();
@@ -169,428 +178,394 @@ pub fn start() void {
     mixer.start_audio();
 }
 
-fn tick_stars() void {
-    for (&starfield) |*star| {
-        var x = star.x - star.speed * 2.0;
-        if (x < 0.0) x = @floatFromInt(cart.screen_width);
-        star.x = x;
+fn addWallsToMap() void {
+    for (0..map_width) |x| {
+        map_grid[x][0] = MapLocationType.wall;
+        map_grid[x][map_height - 1] = MapLocationType.wall;
+    }
+    for (0..map_height) |y| {
+        map_grid[0][y] = MapLocationType.wall;
+        map_grid[map_width - 1][y] = MapLocationType.wall;
     }
 }
 
-fn draw_stars() void {
-    const shaky = (player.y / cart.screen_height) * -15.0;
-    for (&starfield) |*star| {
-        cart.hline(.{
-            .x = @intFromFloat(star.x),
-            .y = @intFromFloat(star.y + shaky * star.speed),
-            .len = @intFromFloat(star.speed * 4.0 + 1.0),
-            .color = star.color,
-        });
-    }
+fn addStartingPipsToMap() void {
+    map_grid[4][17] = MapLocationType.pip;
+    map_grid[19][7] = MapLocationType.pip;
+    map_grid[22][20] = MapLocationType.pip;
 }
 
-fn noisy(freq: f32, len: f32, vol: u8, channel: u8) void {
-    if (quietMode) return;
-    mixer.tone(.{
-        .frequency = .hz(@intFromFloat(freq + 0.5)),
-        .duration = .seconds(len - 0.04),
-        .volume = vol,
-        .flags = .{
-            .channel = @fromBackingInt(@intCast(channel)),
+fn addSnakeToMap() void {
+    switch (snake_1.current_direction) {
+        .up => {
+            for (0..snake_1.body_len) |index| {
+                if (index == 0)
+                    map_grid[snake_1.head_coord.x][snake_1.head_coord.y + index] = MapLocationType.snake_head;
+                if (index != 0)
+                    map_grid[snake_1.head_coord.x][snake_1.head_coord.y + index] = MapLocationType.snake_body_up;
+            }
+            snake_1.tail_coord.x = snake_1.head_coord.x;
+            snake_1.tail_coord.y = snake_1.head_coord.y + snake_1.body_len - 1;
         },
-    });
-}
-
-fn spawn_bullet(bullet: Bullet) void {
-    for (&bullets) |*b| {
-        if (b.state != .dead) continue;
-        b.* = bullet;
-        if (bullet.state == .dot) {
-            noisy(880.0, 0.1, 100, 0);
-        } else {
-            noisy(440.0, 0.08, 50, 0);
-        }
-        break;
+        .down => {
+            for (0..snake_1.body_len) |index| {
+                if (index == 0)
+                    map_grid[snake_1.head_coord.x][snake_1.head_coord.y - index] = MapLocationType.snake_head;
+                if (index != 0)
+                    map_grid[snake_1.head_coord.x][snake_1.head_coord.y - index] = MapLocationType.snake_body_down;
+            }
+            snake_1.tail_coord.x = snake_1.head_coord.x;
+            snake_1.tail_coord.y = snake_1.head_coord.y - snake_1.body_len + 1;
+        },
+        .left => {
+            for (0..snake_1.body_len) |index| {
+                if (index == 0)
+                    map_grid[snake_1.head_coord.x + index][snake_1.head_coord.y] = MapLocationType.snake_head;
+                if (index != 0)
+                    map_grid[snake_1.head_coord.x + index][snake_1.head_coord.y] = MapLocationType.snake_body_left;
+            }
+            snake_1.tail_coord.x = snake_1.head_coord.x + snake_1.body_len - 1;
+            snake_1.tail_coord.y = snake_1.head_coord.y + snake_1.body_len;
+        },
+        .right => {
+            for (0..snake_1.body_len) |index| {
+                if (index == 0)
+                    map_grid[snake_1.head_coord.x - index][snake_1.head_coord.y] = MapLocationType.snake_head;
+                if (index != 0)
+                    map_grid[snake_1.head_coord.x - index][snake_1.head_coord.y] = MapLocationType.snake_body_right;
+            }
+            snake_1.tail_coord.x = snake_1.head_coord.x - snake_1.body_len + 1;
+            snake_1.tail_coord.y = snake_1.head_coord.y + snake_1.body_len;
+        },
     }
 }
 
-fn tick_bullets() void {
-    if (cart.controls.a) {
-        if (player.cooldown > 0) {
-            player.cooldown -= 1;
-        } else {
-            player.cooldown = 4;
-            spawn_bullet(.{
-                .x = player.x + 7.0 + (rand_float() - 0.5) * 3.0,
-                .y = player.y + (rand_float() - 0.5),
-                .dx = 3.0 + (rand_float() * 0.2),
-                .dy = 0.5 * (rand_float() - 0.5),
-                .state = .dot,
-            });
-        }
-    }
-    for (&bullets) |*bullet| {
-        if (bullet.state == .dead) continue;
-        bullet.x += bullet.dx;
-        bullet.y += bullet.dy;
-        if (bullet.x > cart.screen_width or
-            bullet.y > cart.screen_height or
-            bullet.x < 0 or
-            bullet.y < 0) bullet.state = .dead;
-    }
-}
-
-fn draw_bullets() void {
-    cart.trace("ss:draw-b");
-    for (&bullets) |*bullet| {
-        switch (bullet.state) {
-            .dot => {
-                cart.rect(.{
-                    .x = @intFromFloat(bullet.x),
-                    .y = @intFromFloat(bullet.y),
-                    .width = 2,
-                    .height = 2,
-                    .stroke_color = rgb565(white),
-                    .fill_color = rgb565(white),
-                });
-            },
-            .cross => {
-                cart.hline(.{
-                    .x = @intFromFloat(bullet.x - 1),
-                    .y = @intFromFloat(bullet.y),
-                    .len = 3,
-                    .color = rgb565(lblue),
-                });
-                cart.vline(.{
-                    .x = @intFromFloat(bullet.x),
-                    .y = @intFromFloat(bullet.y - 1),
-                    .len = 3,
-                    .color = rgb565(lblue),
-                });
-            },
-            else => {},
-        }
-    }
-}
-
-fn tick_player() void {
+var movementTick: u8 = 0;
+var movementTickMax: u8 = 20;
+fn tickSnake() void {
     if (cart.controls.up) {
-        player.speed = @max(-3.0, player.speed - 0.2);
+        snake_1.current_direction = .up;
     }
     if (cart.controls.down) {
-        player.speed = @min(3.0, player.speed + 0.2);
+        snake_1.current_direction = .down;
     }
-    if (!cart.controls.up and !cart.controls.down) {
-        player.speed = player.speed * 0.66;
+    if (cart.controls.left) {
+        snake_1.current_direction = .left;
     }
-    player.y = player.y + player.speed;
-    if (player.y < 8.0) {
-        player.y = 8.0;
-        player.speed = 0.0;
+    if (cart.controls.right) {
+        snake_1.current_direction = .right;
     }
-    if (player.y > @as(f32, cart.screen_height) - 8.0) {
-        player.y = @as(f32, cart.screen_height) - 8.0;
-        player.speed = 0.0;
-    }
-}
+    movementTick += (snake_1.body_len / 10) + 1;
 
-fn draw_player() void {
-    cart.trace("ss:draw-p");
-    const speed = player.speed;
-    const xpos: i32 = @intFromFloat(player.x - @as(f32, @floatFromInt(player.cooldown)) * 0.5);
-    if (speed < -0.1) {
-        cart.rect(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y),
-            .width = 8,
-            .height = 2,
-            .stroke_color = rgb565(shipBottom),
-            .fill_color = rgb565(shipBottom),
-        });
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y - 1),
-            .len = 3,
-            .color = rgb565(shipBottom),
-        });
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y - 2),
-            .len = 1,
-            .color = rgb565(shipBottom),
-        });
-    } else if (speed > 0.1) {
-        cart.rect(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y),
-            .width = 8,
-            .height = 2,
-            .stroke_color = rgb565(shipTop),
-            .fill_color = rgb565(shipTop),
-        });
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y + 2),
-            .len = 3,
-            .color = rgb565(shipTop),
-        });
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y + 3),
-            .len = 1,
-            .color = rgb565(shipTop),
-        });
-    } else {
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y),
-            .len = 8.0,
-            .color = rgb565(shipTop),
-        });
-        cart.hline(.{
-            .x = xpos,
-            .y = @intFromFloat(player.y + 1),
-            .len = 8.0,
-            .color = rgb565(shipBottom),
-        });
-    }
-
-    const r = rand_float();
-    if (r > 0.2) {
-        cart.hline(.{
-            .x = xpos - @as(i32, @intFromFloat(r * 6.0)),
-            .y = @intFromFloat(player.y + r + 0.2),
-            .len = @intFromFloat(r * 5.0),
-            .color = rgb565(flash),
-        });
-    }
-
-    // draw health with neopixels
-    for (cart.neopixels, 0..) |*np, i| {
-        if (player.health > i) {
-            np.* = dark_green;
-        } else {
-            np.* = dark_red;
-        }
-    }
-}
-
-fn reset_game() void {
-    level = 0;
-    levelTime = 0;
-    shouldSpawn = 0;
-    for (&enemies) |*slot| slot.state = .dead;
-    for (&bullets) |*slot| slot.state = .dead;
-    player.health = MaxHealth;
-    player.cooldown = 0;
-    player.score = 0;
-}
-
-fn spawn_enemy(enemy: Enemy) void {
-    for (&enemies) |*slot| {
-        if (slot.state == .dead) {
-            slot.* = enemy;
-            break;
-        }
-    }
-}
-
-fn level_cleared() bool {
-    for (enemies) |enemy| {
-        if (enemy.state != .dead) {
-            return false;
-        }
-    }
-    return true;
-}
-
-fn tick_enemies() void {
-    levelTime +%= 1;
-    if (levelTime > 100 and level_cleared()) {
-        levelTime = 0;
-        level += 1;
-        shouldSpawn = @min(level, MaxEnemies);
-    }
-
-    // spawn enemies
-    if ((levelTime > 0 and (levelTime % 50) == 0) and (shouldSpawn > 0)) {
-        spawn_enemy(.{
-            .state = .live,
-            .x = cart.screen_width,
-            .y = (0.2 + rand_float() * 0.8) * cart.screen_height,
-            .speed = 0.8,
-            .health = 1,
-            .cooldown = 0,
-        });
-        shouldSpawn -= 1;
-    }
-
-    for (&enemies) |*enemy| {
-        switch (enemy.state) {
-            .live => {
-                const hw: f32 = EnemyWidth * 0.5;
-                const hh: f32 = EnemyWidth * 0.5;
-
-                // move enemy
-                enemy.x = enemy.x - enemy.speed;
-                enemy.y = enemy.y + std.math.sin(@as(f32, @floatFromInt(levelTime % 100)) * 0.01) * 0.1;
-                // collide with bullets
-                for (&bullets) |*bullet| {
-                    if (bullet.state == .dot) {
-                        if (bullet.x < enemy.x + hw and bullet.x > enemy.x - hw) {
-                            if (bullet.y < enemy.y + hh and bullet.y > enemy.y - hh) {
-                                bullet.state = .dead;
-                                enemy.state = .dying;
-                                enemy.cooldown = 1;
-                                player.score += 1;
-                                noisy(440.0, 0.2, 100, 3);
-                                continue;
-                            }
-                        }
-                    }
-                }
-                // collide with player
-                if (enemy.x - hw < player.x + PlayerWidth and enemy.x + hw > player.x) {
-                    if (enemy.y - hh < player.y + 1 and enemy.y + hh > player.y - 1) {
-                        enemy.state = .dying;
-                        enemy.cooldown = 1;
-                        if (player.health > 0) {
-                            player.health -= 1;
-                            player.score = 0;
-                            noisy(220.0, 0.2, 80, 1);
-                        } else {
-                            noisy(440.0, 0.2, 100, 3);
-                        }
-                    }
-                }
-
-                if (level > 1 and rand_float() > 0.975) {
-                    spawn_bullet(.{
-                        .x = enemy.x - 5.0,
-                        .y = enemy.y + (EnemyWidth / 2),
-                        .dx = -0.8 - (rand_float() * 0.5),
-                        .dy = 0.5 * (rand_float() - 0.5),
-                        .state = .cross,
-                    });
-                }
-
-                // remove enemy when exiting the screen
-                if (enemy.x < -4.0) enemy.state = .dead;
+    if (movementTick > movementTickMax) {
+        movementTick = 0;
+        const moveResult = MoveSnake(snake_1.current_direction);
+        switch (moveResult) {
+            .collision => {
+                gameState = GameState.game_over;
             },
-            .dying => {
-                enemy.cooldown += 1;
-                if (enemy.cooldown > 16) {
-                    enemy.state = .dead;
-                }
-            },
-            else => {},
+            .collected_pip => {},
+            .normal => {},
+            .err => {},
         }
     }
 }
 
-fn draw_enemies() void {
-    cart.trace("ss:draw-e");
-    for (&enemies) |*enemy| {
-        if (enemy.state == .dead) continue;
-        if (enemy.state == .dying) {
-            cart.trace("ss:dying-oval");
-            const hw: f32 = @as(f32, @floatFromInt(enemy.cooldown * 2)) * 0.5;
-            cart.oval(.{
-                .x = @intFromFloat(enemy.x - hw),
-                .y = @intFromFloat(enemy.y - hw),
-                .width = enemy.cooldown * 2,
-                .height = enemy.cooldown * 2,
-                .stroke_color = rgb565(red),
-                .fill_color = rgb565(white),
-            });
+var prng = std.Random.DefaultPrng.init(6428);
+const newRand = prng.random();
+fn spawnPip() void {
+    var spawned: bool = false;
+    while (!spawned) {
+        const randX = newRand.intRangeAtMost(u8, 1, map_width - 1);
+        const randY = newRand.intRangeAtMost(u8, 1, map_height - 1);
+        const locationType: MapLocationType = map_grid[randX][randY];
+        if (locationType == MapLocationType.empty) {
+            map_grid[randX][randY] = MapLocationType.pip;
+            spawned = true;
         }
-        const colors = [_]cart.NeopixelColor{ mandarin_sorbet, purp, green, zig };
-        const clr = rgb565(colors[level % colors.len]);
-        if (enemy.state == .live) {
-            cart.trace("ss:live");
-            cart.hline(.{
-                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
-                .y = @intFromFloat(enemy.y + EnemyWidth / 2 - 1),
-                .len = EnemyWidth,
-                .color = clr,
-            });
-            cart.hline(.{
-                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
-                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
-                .len = EnemyWidth,
-                .color = clr,
-            });
-            cart.vline(.{
-                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
-                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
-                .len = 3,
-                .color = rgb565(red),
-            });
-            cart.vline(.{
-                .x = @intFromFloat(enemy.x - EnemyWidth / 2),
-                .y = @intFromFloat(enemy.y + EnemyWidth / 2 - 3),
-                .len = 3,
-                .color = rgb565(red),
+    }
+}
+
+var pipTick: u16 = 0;
+var pipMax: u8 = 200;
+fn tickPips() void {
+    pipTick += 1;
+    if (pipTick > pipMax) {
+        pipTick = 0;
+        spawnPip();
+    }
+}
+
+fn drawSnakeSegment(x: i32, y: i32) void {
+    cart.rect(.{
+        .x = x * gridsquare_width,
+        .y = y * gridsquare_width,
+        .width = gridsquare_width,
+        .height = gridsquare_width,
+        .stroke_color = rgb565(snake_1.color_2),
+        .fill_color = rgb565(snake_1.color_1),
+    });
+}
+
+fn drawSnakeHead(x: i32, y: i32) void {
+    drawSnakeSegment(x, y);
+    switch (snake_1.current_direction) {
+        .up => {
+            cart.rect(.{
+                .x = x * gridsquare_width + 1,
+                .y = y * gridsquare_width + 1,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
             });
             cart.rect(.{
-                .x = @intFromFloat(enemy.x + 2),
-                .y = @intFromFloat(enemy.y - EnemyWidth / 2),
-                .width = 6,
-                .height = EnemyWidth,
-                .fill_color = clr,
+                .x = x * gridsquare_width + gridsquare_width - 2,
+                .y = y * gridsquare_width + 1,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
             });
-            cart.trace("ss:live-oval");
-            cart.oval(.{
-                .x = @intFromFloat(enemy.x),
-                .y = @intFromFloat(enemy.y - 3),
-                .width = 6,
-                .height = 6,
-                .fill_color = rgb565(black),
+        },
+        .down => {
+            cart.rect(.{
+                .x = x * gridsquare_width + gridsquare_width - 2,
+                .y = y * gridsquare_width + gridsquare_width - 2,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
             });
-            cart.trace("ss:oval-ok");
+            cart.rect(.{
+                .x = x * gridsquare_width + 1,
+                .y = y * gridsquare_width + gridsquare_width - 2,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
+            });
+        },
+        .left => {
+            cart.rect(.{
+                .x = x * gridsquare_width + 1,
+                .y = y * gridsquare_width + gridsquare_width - 2,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
+            });
+            cart.rect(.{
+                .x = x * gridsquare_width + 1,
+                .y = y * gridsquare_width + 1,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
+            });
+        },
+        .right => {
+            cart.rect(.{
+                .x = x * gridsquare_width + gridsquare_width - 2,
+                .y = y * gridsquare_width + 1,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
+            });
+            cart.rect(.{
+                .x = x * gridsquare_width + gridsquare_width - 2,
+                .y = y * gridsquare_width + gridsquare_width - 2,
+                .width = 1,
+                .height = 1,
+                .stroke_color = rgb565(snake_1.color_eyes),
+                .fill_color = rgb565(snake_1.color_eyes),
+            });
+        },
+    }
+}
+
+fn MoveSnake(direction: Direction) MovementResult {
+    //Check spot in front of snake
+    //Replace the head with a direction body segment
+    var spot_ahead_type: MapLocationType = undefined;
+    var spot_ahead_coord: Coordinate = snake_1.head_coord;
+    switch (direction) {
+        .up => {
+            spot_ahead_coord.y -= 1;
+            map_grid[snake_1.head_coord.x][snake_1.head_coord.y] = MapLocationType.snake_body_up;
+        },
+        .down => {
+            spot_ahead_coord.y += 1;
+            map_grid[snake_1.head_coord.x][snake_1.head_coord.y] = MapLocationType.snake_body_down;
+        },
+        .left => {
+            spot_ahead_coord.x -= 1;
+            map_grid[snake_1.head_coord.x][snake_1.head_coord.y] = MapLocationType.snake_body_left;
+        },
+        .right => {
+            spot_ahead_coord.x += 1;
+            map_grid[snake_1.head_coord.x][snake_1.head_coord.y] = MapLocationType.snake_body_right;
+        },
+    }
+    //Save what is in front of the snake
+    spot_ahead_type = map_grid[spot_ahead_coord.x][spot_ahead_coord.y];
+    var future_ret_val: MovementResult = MovementResult.normal;
+    switch (spot_ahead_type) {
+        .wall, .snake_body_down, .snake_body_left, .snake_body_right, .snake_body_up, .snake_head => {
+            return MovementResult.collision;
+        },
+        .pip => {
+            future_ret_val = .collected_pip;
+            collectedPip();
+        },
+        .empty => {
+            future_ret_val = .normal;
+        },
+    }
+
+    if (future_ret_val != .collected_pip) {
+        //Replace tail with empty grid
+        const tail_type = map_grid[snake_1.tail_coord.x][snake_1.tail_coord.y];
+        map_grid[snake_1.tail_coord.x][snake_1.tail_coord.y] = MapLocationType.empty;
+        switch (tail_type) {
+            .snake_body_up => {
+                snake_1.tail_coord.y -= 1;
+            },
+            .snake_body_down => {
+                snake_1.tail_coord.y += 1;
+            },
+            .snake_body_left => {
+                snake_1.tail_coord.x -= 1;
+            },
+            .snake_body_right => {
+                snake_1.tail_coord.x += 1;
+            },
+            .empty, .snake_head, .pip, .wall => {},
+        }
+    }
+
+    //Add head to spot in front
+    map_grid[spot_ahead_coord.x][spot_ahead_coord.y] = MapLocationType.snake_head;
+    snake_1.head_coord.x = spot_ahead_coord.x;
+    snake_1.head_coord.y = spot_ahead_coord.y;
+
+    return future_ret_val;
+}
+
+fn collectedPip() void {
+    snake_1.score += 1;
+    snake_1.body_len += 1;
+    spawnPip();
+}
+
+fn resetGame() void {
+    snake_1.score = 0;
+    map_grid = std.mem.zeroes([map_width][map_height]MapLocationType);
+    addWallsToMap();
+    addStartingPipsToMap();
+
+    snake_1 = .{
+        .head_coord = .{ .x = 16, .y = 12 },
+        .tail_coord = .{ .x = 16, .y = 14 },
+        .body_len = 3,
+        .color_1 = green,
+        .color_2 = dgreen,
+        .color_eyes = red,
+        .current_direction = .up,
+        .score = 0,
+    };
+    addSnakeToMap();
+}
+
+fn drawUi() void {
+    cart.trace("ss:draw-l");
+    if (snake_1.score > 0) {
+        var text: [32]u8 = undefined;
+        const txt = std.fmt.bufPrintSentinel(&text, "{}", .{snake_1.score}, 0) catch "-";
+        cart.text(.{
+            .str = txt,
+            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
+            .y = 10,
+            .text_color = rgb565(grey),
+        });
+    }
+}
+
+fn drawUiGameEnd() void {
+    cart.trace("ss:draw-l");
+    if (snake_1.score > 0) {
+        var text: [32]u8 = undefined;
+        const txt = std.fmt.bufPrintSentinel(&text, "Score: {}", .{snake_1.score}, 0) catch "-";
+        cart.text(.{
+            .str = txt,
+            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
+            .y = 80,
+            .text_color = rgb565(grey),
+        });
+    }
+}
+
+fn drawMap() void {
+    cart.trace("ss:draw-w");
+    for (0..map_width) |x| {
+        for (0..map_height) |y| {
+            const currentLocation = map_grid[x][y];
+            if (map_grid[x][y] == MapLocationType.wall) {
+                drawWallSegment(@as(i32, @intCast(x)) * gridsquare_width, @as(i32, @intCast(y)) * gridsquare_width);
+            }
+            switch (currentLocation) {
+                .wall => {
+                    drawWallSegment(@as(i32, @intCast(x)) * gridsquare_width, @as(i32, @intCast(y)) * gridsquare_width);
+                },
+                .empty => {
+                    drawEmptySquare(@as(i32, @intCast(x)), @as(i32, @intCast(y)));
+                },
+                .snake_body_down, .snake_body_left, .snake_body_right, .snake_body_up => {
+                    drawSnakeSegment(@as(i32, @intCast(x)), @as(i32, @intCast(y)));
+                },
+                .snake_head => {
+                    drawSnakeHead(@as(i32, @intCast(x)), @as(i32, @intCast(y)));
+                },
+                .pip => {
+                    drawPip(@as(i32, @intCast(x)), @as(i32, @intCast(y)));
+                },
+            }
         }
     }
 }
 
-fn draw_level() void {
-    cart.trace("ss:draw-l");
-    if (player.score > 0) {
-        var text: [32]u8 = undefined;
-        const txt = std.fmt.bufPrintSentinel(&text, "{}", .{player.score}, 0) catch "-";
-        cart.text(.{
-            .str = txt,
-            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
-            .y = 4,
-            .text_color = rgb565(white),
-        });
-    }
-
-    if (level > 0 and levelTime < 100 and rand_float() < 0.5) {
-        const txt = "NEW WAVE";
-        cart.text(.{
-            .str = txt,
-            .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
-            .y = @intCast((cart.screen_height - cart.font_height) / 2),
-            .text_color = rgb565(red),
-        });
-    }
+fn drawWallSegment(x: i32, y: i32) void {
+    cart.rect(.{
+        .x = x,
+        .y = y,
+        .width = gridsquare_width,
+        .height = gridsquare_width,
+        .stroke_color = rgb565(wall.color_1),
+        .fill_color = rgb565(wall.color_2),
+    });
 }
 
-const bannerText = "sycl 2024";
-const bannerWidth = cart.font_width * bannerText.len;
-var bannerPos: f32 = cart.screen_width / 2;
-
-fn draw_banner() void {
-    cart.trace("ss:draw-bn");
-    cart.text(.{
-        .str = bannerText,
-        .x = @intFromFloat(bannerPos),
-        .y = cart.screen_height - 12,
-        .text_color = rgb565(light),
+fn drawEmptySquare(x: i32, y: i32) void {
+    cart.rect(.{
+        .x = x * gridsquare_width + gridsquare_width / 2,
+        .y = y * gridsquare_width + gridsquare_width / 2,
+        .width = 1,
+        .height = 1,
+        .stroke_color = rgb565(white),
+        .fill_color = rgb565(white),
     });
-    bannerPos -= 0.233;
-    if (bannerPos < -@as(f32, @floatFromInt(bannerWidth)))
-        bannerPos = cart.screen_width;
+}
+
+fn drawPip(x: i32, y: i32) void {
+    cart.rect(.{
+        .x = x * gridsquare_width + gridsquare_width / 2 - 1,
+        .y = y * gridsquare_width + gridsquare_width / 2 - 1,
+        .width = pip.size,
+        .height = pip.size,
+        .stroke_color = rgb565(pip.color_2),
+        .fill_color = rgb565(pip.color_1),
+    });
 }
 
 const GameState = enum {
@@ -601,36 +576,42 @@ const GameState = enum {
 var gameState: GameState = .intro;
 
 const introText = &[_][]const u8{
-    "SPACE",
-    "SHOOTER",
+    "SYCL",
+    "SNAKE",
     "",
-    "by @krig",
+    "by @CamoKnight117",
     "",
     "Press START",
 };
 const spacing = (cart.font_height * 4 / 3);
-var shakex: [introText.len]i32 = @splat(0);
-var shakey: [introText.len]i32 = @splat(0);
 
-fn draw_intro_text() void {
+fn drawIntroText() void {
     const y_start = (cart.screen_height - (cart.font_height + spacing * (introText.len - 1))) / 2;
-    if (rand_float() < 0.1) {
-        for (shakex, 0..) |_, i| {
-            shakex[i] = @intFromFloat(rand_float() * 8.0);
-            shakey[i] = @intFromFloat(rand_float() * 4.0);
-        }
-    }
     for (introText, 0..) |line, i| {
-        const flicker = rand_float() < 0.2;
-        if (!flicker) {
-            cart.text(.{
-                .str = line,
-                .x = @as(i32, @intCast((cart.screen_width - cart.font_width * line.len) / 2)) + shakex[i],
-                .y = @as(i32, @intCast(y_start + spacing * i)) + shakey[i],
-                .text_color = rgb565(zig),
-            });
-        }
+        cart.text(.{
+            .str = line,
+            .x = @as(i32, @intCast((cart.screen_width - cart.font_width * line.len) / 2)),
+            .y = @as(i32, @intCast(y_start + spacing * i)),
+            .text_color = rgb565(white),
+        });
     }
+}
+
+const bannerText = "SYCL 2026";
+const bannerWidth = cart.font_width * bannerText.len;
+var bannerPos: f32 = cart.screen_width / 2;
+
+fn drawBanner() void {
+    cart.trace("ss:draw-bn");
+    cart.text(.{
+        .str = bannerText,
+        .x = @intFromFloat(bannerPos),
+        .y = cart.screen_height - 24,
+        .text_color = rgb565(grey),
+    });
+    bannerPos -= 0.233;
+    if (bannerPos < -@as(f32, @floatFromInt(bannerWidth)))
+        bannerPos = cart.screen_width;
 }
 
 var stateTick: u16 = 0;
@@ -638,11 +619,11 @@ var pixelTick: u8 = 0;
 var quietMode: bool = false;
 var select_held_frames: u8 = 0; // Debounce: require SELECT held to reset from game
 
-// Diagnostic frame counter for crash-location tracing.
-// Every 30 frames we send "ss:F=NNN" via cart.trace() while in game mode.
-// draw_enemies() also sends a trace before each complex drawing operation
-// so the last [CART] message visible in the console before the crash/[PANIC]
-// pinpoints the crash location.
+// // Diagnostic frame counter for crash-location tracing.
+// // Every 30 frames we send "ss:F=NNN" via cart.trace() while in game mode.
+// // draw_enemies() also sends a trace before each complex drawing operation
+// // so the last [CART] message visible in the console before the crash/[PANIC]
+// // pinpoints the crash location.
 var diag_frame: u32 = 0;
 
 pub fn update() void {
@@ -658,11 +639,10 @@ pub fn update() void {
     if (cart.controls.select and cart.controls.down) {
         quietMode = true;
     }
+
     if (gameState == .intro) {
-        tick_stars();
-        draw_stars();
-        draw_intro_text();
-        // Accept START after ~10 frames (~166ms) instead of 50 - avoids feeling unresponsive
+        drawIntroText();
+
         if (stateTick > 10 and cart.controls.start) {
             gameState = .game;
             stateTick = 0;
@@ -670,14 +650,12 @@ pub fn update() void {
 
         for (cart.neopixels, 0..) |*np, i| {
             if (quietMode) {
-                np.* = if (pixelTick == i) punk else black;
+                np.* = if (pixelTick == i) blue else black;
             } else {
-                np.* = if (pixelTick == i) blend(black, zig, 0.05) else black;
+                np.* = if (pixelTick == i) blend(black, white, 0.05) else black;
             }
         }
     } else if (gameState == .game_over) {
-        tick_stars();
-        draw_stars();
         const gameOver = "GAME OVER";
         if (rand_float() < 0.8) {
             cart.text(.{
@@ -688,7 +666,7 @@ pub fn update() void {
             });
         }
         if (stateTick > 10 and cart.controls.start) {
-            reset_game();
+            resetGame();
             gameState = .intro;
             stateTick = 0;
         }
@@ -696,9 +674,10 @@ pub fn update() void {
             if (rand_float() > 0.8) {
                 np.* = black;
             } else if (rand_float() > 0.8) {
-                np.* = dark_red;
+                np.* = red;
             }
         }
+        drawUiGameEnd();
     } else {
         // SELECT+DOWN = intentional reset (avoids accidental resets from SELECT noise).
         // SELECT alone no longer resets - was causing rapid resets to intro screen.
@@ -708,7 +687,7 @@ pub fn update() void {
             select_held_frames = 0;
         }
         if (select_held_frames >= 20) {
-            reset_game();
+            resetGame();
             gameState = .intro;
             stateTick = 0;
             select_held_frames = 0;
@@ -723,34 +702,26 @@ pub fn update() void {
             cart.trace("ss:tick");
         }
 
-        tick_game();
-        if (player.health == 0) {
-            gameState = .game_over;
-            stateTick = 0;
-            return;
-        }
-        draw_game();
+        tickGame();
+        // if (gameOverConditionMet()) {
+        //     gameState = .game_over;
+        //     stateTick = 0;
+        //     return;
+        // }
+        drawGame();
     }
 
     mixer.update();
 }
 
-fn tick_game() void {
-    cart.trace("ss:tg-stars");
-    tick_stars();
-    cart.trace("ss:tg-bullets");
-    tick_bullets();
-    cart.trace("ss:tg-enemies");
-    tick_enemies();
-    cart.trace("ss:tg-player");
-    tick_player();
+fn tickGame() void {
+    cart.trace("ss:tg-snake");
+    tickSnake();
+    tickPips();
 }
 
-fn draw_game() void {
-    draw_stars();
-    draw_enemies();
-    draw_player();
-    draw_bullets();
-    draw_level();
-    draw_banner();
+fn drawGame() void {
+    drawMap();
+    drawBanner();
+    drawUi();
 }
