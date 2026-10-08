@@ -1,0 +1,1705 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+	<meta charset="utf-8">
+	<title>Intro to SIMD in Zig</title>
+
+	<link rel="stylesheet" type="text/css" href="./fonts/Iosevka/Iosevka.css">
+
+	<style>
+		[hidden] {
+		  display: none;
+		}
+
+		g.slide:not([hidden]) > .h2:first-child,
+		g.slide:not([hidden]) > [click=""]:not([hidden]),
+		g.slide:not([hidden]) > [click=""]:not([hidden]) text:not(.highlighted),
+		g.slide:not([hidden]) > [click=""]:not([hidden]) tspan:not(.highlighted),
+		g.slide:not([hidden]) > :first-child:not([hidden]):not(svg) text:not(.highlighted),
+		g.slide:not([hidden]) > :first-child:not([hidden]):not(svg) tspan:not(.highlighted)
+		{
+			animation: unhide 1s cubic-bezier(0, 0, 0.53, 1) 0s 1 forwards;
+		}
+
+
+		g.slide:not([hidden]) > [click=""]:not([hidden]) text.highlighted,
+		g.slide:not([hidden]) > [click=""]:not([hidden]) tspan.highlighted,
+		g.slide:not([hidden]) > :first-child:not([hidden]):not(svg) text.highlighted,
+		g.slide:not([hidden]) > :first-child:not([hidden]):not(svg) tspan.highlighted
+		{
+			animation: unhide-highlighted 1s cubic-bezier(0, 0, 0.53, 1) 0s 1 forwards;
+		}
+
+		g.slide:not([hidden]) {
+			animation: unhide-slide 1s ease 0s 1 forwards;
+		}
+
+		@keyframes unhide {
+			0%   { transform: translateY(-60px); stroke: rgba(255, 255, 255, 1); stroke-width: 5px; }
+			100% { transform: translateY(0); stroke: rgba(255, 255, 255, 0) }
+		}
+
+		@keyframes unhide-highlighted {
+			0%   { transform: translateY(-60px); stroke: rgba(255, 255, 255, 1); stroke-width: 5px; }
+			100% { transform: translateY(0); stroke: rgba(255, 0, 0, 1); stroke-width: inherit; }
+		}
+
+		@keyframes unhide-slide {
+			from   { transform: translateY(-60px); }
+		}
+
+		g.slide#title {
+			animation: unhide-svg 10s cubic-bezier(0, 1, 0, 1) 0s 1 forwards !important;
+		}
+
+		@keyframes unhide-svg {
+			0%   { transform: scale(0) translate(1100px, 1600px); }
+			100% { transform: scale(1) translate(0, 0); }
+		}
+
+		@font-face {
+			font-family: 'Press Start 2P';
+			src: url('./fonts/Press_Start_2P/PressStart2P-Regular.ttf') format('truetype');
+			font-weight: 400;
+			font-style: normal;
+			font-display: block;
+		}
+
+		@font-face {
+			font-family: 'Ysabeau Office';
+			src: url('./fonts/Ysabeau_Office/static/YsabeauOffice-Regular.ttf') format('truetype');
+			font-weight: 400;
+			font-style: normal;
+			font-display: block;
+		}
+
+		@font-face {
+			font-family: 'Ysabeau Office';
+			src: url('./fonts/Ysabeau_Office/static/YsabeauOffice-Medium.ttf') format('truetype');
+			font-weight: 500;
+			font-style: normal;
+			font-display: block;
+		}
+
+		* {
+			padding: 0;
+			margin: 0;
+			box-sizing: border-box;
+		}
+
+		html, body, #container {
+			height: 100%;
+			width: 100%;
+			font-size: 12pt
+		}
+
+		.h1, .h2, .h3, .h4 {
+			font-family: "Press Start 2P";
+			color: hsl(265, 89%, 78%);
+			text-align: center;
+			line-height: 1.25;
+		}
+
+		.h2, .h3, .h4 {
+			fill: hsl(265, 89%, 78%);
+		}
+
+		h1, .h1 {
+			font-size: 8rem;
+		}
+
+		h2, .h2 {
+			font-size: 4.25rem;
+		}
+
+		.h3 {
+			font-size: 2.75rem;
+		}
+
+		.h4 {
+			font-size: 2rem;
+		}
+
+		#container {
+			height: 100%;
+			width: 100%;
+			position: absolute;
+			background-color: #000
+			/* animation: container-background 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0s 1 forwards; */
+		}
+
+		@keyframes container-background {
+			0% { background-color: hsl(231, 15%, 18%) }
+			100%   { background-color: #000 }
+		}
+
+		/* .slide {
+			padding-top: 1in;
+			padding-bottom: 1in;
+			padding-left: 1in;
+			padding-right: 1in;
+		} */
+
+		ol, ul, p, pre {
+			font-size: 2.5rem;
+			color: #F8F8F2;
+			font-family: "Press Start 2P";
+			line-height: 1.25;
+			letter-spacing: -2px;
+		}
+
+		ol, ul, p {
+			margin-left: 4rem;
+		}
+
+		.slide > p,
+		.slide > ul,
+		.slide > ol {
+			margin-top: 1rem;
+		}
+
+		ol ol {
+			list-style-type: lower-alpha;
+		}
+
+		a {
+			color:aqua
+		}
+	</style>
+
+	<script>
+	    const global_animations = [];
+		const state_transitions = new Map();
+		const post_processes = [];
+	</script>
+</head>
+
+<body style="padding-bottom: 0px; padding-right: 0px">
+
+<svg id="container" viewBox="0 0 1920 1080" version="1.1" xmlns="http://www.w3.org/2000/svg">
+	<g class="slide" id="title">
+		<text class="h1 title-line" x="965" y="325" fill="#F7A41D" text-anchor="middle">Intro to SIMD</text>
+
+		<g class="title-line">
+			<text class="h1" x="965" y="575" fill="#F7A41D" text-anchor="middle">in &nbsp;&nbsp;&nbsp;</text>
+
+			<svg id="zig-logo" version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="-1 0 154 140" height="280" width="280" x="965" y="350">
+				<g fill="#F7A41D">
+					<g id="logo-left-side">
+						<polygon points="46,22 28,44 19,30"></polygon>
+						<polygon points="46,22 33,33 28,44 22,44 22,95 31,95 20,100 12,117 0,117 0,22" shape-rendering="crispEdges"></polygon>
+						<polygon points="31,95 12,117 4,106"></polygon>
+					</g>
+					<g id="logo-middle">
+						<polygon points="56,22 62,36 37,44"></polygon>
+						<polygon points="56,22 111,22 111,44 37,44 56,32" shape-rendering="crispEdges"></polygon>
+						<polygon points="116,95 97,117 90,104"></polygon>
+						<polygon points="116,95 100,104 97,117 42,117 42,95" shape-rendering="crispEdges"></polygon>
+						<polygon points="150,0 52,117 3,140 101,22"></polygon>
+					</g>
+					<g id="logo-right-side">
+						<polygon points="141,22 140,40 122,45"></polygon>
+						<polygon points="153,22 153,117 106,117 120,105 125,95 131,95 131,45 122,45 132,36 141,22" shape-rendering="crispEdges"></polygon>
+						<polygon points="125,95 130,110 106,117"></polygon>
+					</g>
+				</g>
+			</svg>
+		</g>
+
+		<text class="h2" id="by-line" x="960" y="925" text-anchor="middle">by Niles Salter / @Validark</text>
+
+		<script>
+			global_animations.push({
+				section: "title",
+				selector: ".title-line, #zig-logo",
+				slide_num: 0,
+				animation_duration: "10s",
+				keyframes: {
+					0:   { "letter-spacing": "-1em", opacity: 0, transform: "scale(0.25) translate(140rem, 50rem)", "font-size": "1rem" },
+					30:  { opacity: 1, "font-size": "8rem" },
+					100: { "letter-spacing": 0, opacity: 1, transform: "scale(1) translate(0, 0)", "font-size": "8rem" },
+				}
+			}, {
+				section: "title",
+				selector: ".title-line > text",
+				slide_num: 0,
+				animation_duration: "10s",
+				keyframes: {
+					0:   { "letter-spacing": "-1em" },
+					100: { "letter-spacing": 0 },
+				}
+			}, {
+				section: "title",
+				selector: "#by-line",
+				slide_num: 0,
+				animation_delay: "10s",
+				animation_duration: "40s",
+				ease: "cubic-bezier(0, 1, 0, 1)",
+				keyframes: {
+					0:   { "letter-spacing": "-1em", opacity: 0 },
+					25:  { opacity: 1 },
+					100: { "letter-spacing": 0, opacity: 1 },
+				}
+			}, {
+				section: "title",
+				selector: "#logo-left-side",
+				slide_num: 0,
+				animation_duration: "10s",
+				ease: "cubic-bezier(0, 1, 0, 1)",
+				keyframes: {
+					0:   { transform: "scaleX(0) translateX(75px)" },
+					100: { transform: "scaleX(1) translateX(0)" },
+				}
+			}, {
+				section: "title",
+				selector: "#logo-right-side",
+				slide_num: 0,
+				animation_duration: "10s",
+				ease: "cubic-bezier(0, 1, 0, 1)",
+				keyframes: {
+					0:   { transform: "scaleX(0) translateX(-75px)" },
+					100: { transform: "scaleX(1) translateX(0)" },
+				}
+			}, {
+				section: "title",
+				selector: "#logo-middle",
+				slide_num: 0,
+				animation_duration: "10s",
+				ease: "cubic-bezier(0, 1, 0, 1)",
+				keyframes: {
+					0:   { transform: "scaleX(0) translateX(0)" },
+					100: { transform: "scaleX(1) translateX(0)" },
+				}
+			});
+		</script>
+	</g>
+
+	<g class="slide" id="itinerary">
+		<text id="itinerary-title" class="h2" x="960" y="125" text-anchor="middle">Itinerary:</text>
+
+		<script>
+			document.getElementById("itinerary-title").insertAdjacentHTML("afterend", [
+				"What is SIMD & Why?",
+				"How do I wield it?"
+			].map((x, i) => `&lt;text click class="h2" id="itinerary-${i}" x="160" y="${225+50+i*125}" text-anchor="start"&gt;- ${x}&lt;/text&gt;`).join(""))
+
+			document.getElementById("itinerary-1").insertAdjacentHTML("afterend", [
+				"How do I setup Godbolt?",
+				"How much can the compiler do?",
+				"What can SIMD do?",
+				"How do I find intrinsics?",
+				"Other resources?",
+			].map((x, i) => `&lt;text click class="h2" style="font-size: 3rem;" x="300" y="${225+50+1.75*125+i*75}" text-anchor="start"&gt;${i + 1}. ${x}&lt;/text&gt;`).join(""))
+		</script>
+	</g>
+
+	<g class="slide" id="definitions">
+		<text id="definitions-title" class="h2" x="960" y="125" text-anchor="middle">Definitions:</text>
+
+		<script>
+			document.getElementById("definitions-title").insertAdjacentHTML("afterend", [
+				"SIMD: Single Instruction, Multiple Data",
+				"SWAR: SIMD within a Register",
+			].map((x, i) => `&lt;text click class="h3" x="60" y="${225+50+i*125}" text-anchor="start"&gt;- ${x}&lt;/text&gt;`).join(""))
+		</script>
+	</g>
+
+
+	<g class="slide" id="basic-idea">
+		<text id="basic-idea-title" class="h2" x="960" y="125" text-anchor="middle">The basic idea</text>
+
+		<g click class="code" x="200" y="200" width="1920" line-height="70" line-num-indent="80" line-indent="100" hide-line-numbers lang="asm" hide-background>
+		add     rdi, r8
+        add     rsi, r9
+        add     rdx, r10
+        add     rcx, r11
+		</g>
+
+		<g click id="transformed-adds">
+			<text class="h1" style="font-size: 12rem;" fill="#fff" x="860" y="325" text-anchor="middle">&rArr;</text>
+
+			<g class="code" x="900" y="200" width="1920" line-height="70" line-num-indent="80" line-indent="100" hide-line-numbers lang="asm" hide-background>
+			vpaddq  ymm0, ymm1, ymm0
+			</g>
+		</g>
+
+		<text click class="h2" id="basic-utility" x="250" y="600" text-anchor="start">Why this is helpful:</text>
+
+		<script>
+		{
+			let iter = 0;
+			let iter2 = 0;
+			let y = 225+50+4.5*100-65-50;
+			let tmp = 0;
+
+		document.getElementById("basic-utility").insertAdjacentHTML("afterend", [
+			"Decrease instruction count",
+				"- Reduces pressure on CPU front-end (decoder+scheduler+&lt;tspan fill=\"green\"&gt;i$&lt;/tspan&gt;)",
+				"-- Lowers power usage &lt;tspan style=\"font-size: 4rem\"&gt;&rArr;&lt;/tspan&gt; higher clock speeds",
+				"- Makes &lt;tspan class=\"highlighted\"&gt;pipelining&lt;/tspan&gt; more likely",
+			"Increase work per instruction",
+				"- We can only execute so many &lt;tspan class=\"highlighted\"&gt;&micro;ops per cycle&lt;/tspan&gt;",
+		].map((x, i) =>
+			x.slice(0, 2) === '--'
+				? `&lt;text click class="h4" x="80" y="${tmp=y,y+=50+10,y}" text-anchor="start"&gt;${["i", "ii"][iter2++]}. ${x.slice(2)}&lt;/text&gt;`
+				: x[0] === '-'
+					? `&lt;text click class="h4" x="60" y="${tmp=y,y+=50+10,y}" text-anchor="start"&gt;${x}&lt;/text&gt;`
+					: `&lt;text click class="h3" x="10" y="${tmp=y,y+=65+10,y}" text-anchor="start"&gt;${++iter}. ${x}&lt;/text&gt;`
+		).join(""))
+		}
+		</script>
+	</g>
+
+	<g class="slide" id="live-coding-break">
+		<text class="h2" x="960" y="125" text-anchor="middle">Tutorial:</text>
+		<g click>
+			<text class="h2" x="360" y="325" text-anchor="start">1. Setup Godbolt</text>
+			<text class="h2" x="360" y="475" text-anchor="start">2. Do stuff</text>
+			<text class="h2" x="360" y="625" text-anchor="start">3. Profit??</text>
+		</g>
+	</g>
+
+
+	<!-- <g class="slide" id="tree" clicks="18:12,25:7,31:3,44:5,55,1">
+		<g class="code" x="0" y="0" width="1920" line-height="70" line-num-indent="80" line-indent="100" hide-background lang="zig" steps="18:5,25:7,31:3,44:2,55:1,5">
+			export fn foo(x: @Vector(64, u8)) u64 {
+				return x == @as(@Vector(64, u8), @splat(' '));
+			}
+
+			export fn bar(y: @Vector(64, u8)) void {
+				{
+					{
+						{
+							true;
+							false;
+							undefined;
+							((((((())))))); // hello
+						}
+					}
+				}
+			}
+
+			export fn baz(y: @Vector(64, u8)) void {
+				{
+					{
+						{
+							true;
+							false;
+							undefined;
+							((((((())))))); // hello
+						}
+					}
+				}
+			}
+
+			export fn quux(y: @Vector(64, u8)) void {
+				{
+					{
+						{
+							true;
+							false;
+							undefined;
+							((((((())))))); // hello
+						}
+					}
+				}
+			}
+
+			export fn beep(y: @Vector(64, u8)) void {
+				{
+					{
+						{
+							true;
+							false;
+							undefined;
+							((((((())))))); // hello
+						}
+					}
+				}
+			}
+		</g>
+	</g> -->
+
+	<g class="slide" id="keywords-lookup" clicks="5">
+		<g id="columnCounts" class="code" lang="zig" x="0" y="10" width="1920" line-height="70" line-num-indent="80" line-indent="245" hide-line-numbers hide-background>
+			export fn columnCounts(chunk: @Vector(16, u8)) @Vector(16, u8) {
+		</g>
+		<text id="bitsy-1" class="bits bits-match-color" align="columnCounts" line="1" label="start_pos">^~~~~~~^~~^~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~^~~~~</text>
+		<text id="bitsy-3" class="bits bits-match-color" align="columnCounts" line="3" label="end_pos">~~~~~^~~^~~~~~~~~~~~~^~~~~~^~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~^~~~</text>
+
+		<text id="bitsy-2" class="bits bits-match-color" align="columnCounts" line="2" label="start_indices">^~~~~~~^~~^~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~^~~~~</text>
+		<text id="bitsy-4" class="bits bits-match-color" align="columnCounts" line="4" label="end_indices">~~~~~^~~^~~~~~~~~~~~~^~~~~~^~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~^~~~</text>
+
+		<text id="bitsy-6" class="bits bits-match-color" align="columnCounts" line="3" label="lengths">~~~~~^~~^~~~~~~~~~~~~^~~~~~^~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~^~~~</text>
+		<!-- <text id="iota" class="bits bits-match-color" align="columnCounts" line="4" label="iota"></text> -->
+		<!-- <text id="iota" class="bits bits-match-color" align="columnCounts" line="4" label="iota">0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%$</text> -->
+		<script>{
+			const str = new Array(64).fill(0).map((_, i) => i).map(x => `&lt;text id="iota" class="bits bits-match-color2" align="columnCounts" line="6.9"&gt;${"&nbsp;".repeat(x)}&lt;tspan class="bits-small"&gt;&lt;tspan class="space-small"&gt;&nbsp;&lt;/tspan&gt;${x.toString().padStart(2, "&nbsp;")}&lt;/tspan&gt;&lt;/text&gt;`).join("\n");
+			document.getElementById("bitsy-6").insertAdjacentHTML("afterend", str);
+		}</script>
+
+		<style>
+			.space-small {
+				font-size: 15px;
+			}
+		</style>
+
+		<!-- <text id="iota" class="bits" align="columnCounts" line="3.9">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<tspan style="font-size: 34px;">10</tspan></text> -->
+		<!-- <text id="iota" class="bits" align="columnCounts" line="3.9">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<tspan style="font-size: 34px;">11</tspan></text> -->
+
+		<script type="text/javascript">
+			function sub(a, b) {
+				return a.map((_, i) => a[i] - b[i] + 1);
+			}
+
+			for (let j = 0; (j += 2) <= 6; ) {
+				const bitsy_2_positions = j === 6
+					? sub([...document.getElementById(`bitsy-4`).innerHTML.matchAll(/\^/g)].map(({ index }) => index),
+					      [...document.getElementById(`bitsy-2`).innerHTML.matchAll(/\^/g)].map(({ index }) => index))
+					: [...document.getElementById(`bitsy-${j}`).innerHTML.matchAll(/\^/g)].map(({ index }) => index);
+
+				post_processes.push(() => {
+					if (j !== 6) {
+						const bitsy = document.getElementById(`bitsy-${j - 1}`);
+						const { innerHTML } = bitsy;
+						bitsy.innerHTML = bitsy.innerHTML
+							.replaceAll('^', '&lt;tspan class="up-arr-1"&gt;' + ('&' + 'lg'[(j >> 1) - 1] + 't;') + '&lt;/tspan&gt;')
+							.replaceAll(/~+/g, e => `&lt;tspan class="bits-underscore"&gt;${'_'.repeat(e.length)}&lt;/tspan&gt;`);
+					}
+
+					{
+						const bitsy = document.getElementById(`bitsy-${j}`);
+						let i = 0;
+
+						bitsy.innerHTML = bitsy.innerHTML
+							.replaceAll(/\^([^~]*?)~/g, (_, e, r) => {
+								const str = "" + bitsy_2_positions[i++];
+								const s = '&lt;tspan class="bits-underscore-2-replacement"&gt;&nbsp;&lt;/tspan&gt;';
+								return (str.length === 1 ? (i <= 2 ? '' : s) + str + e + '~' : str + e) + s;
+							})
+							.replaceAll(/~+/g, e => `&lt;tspan class="bits-underscore-2"&gt;${'_'.repeat(e.length)}&lt;/tspan&gt;`)
+						;
+					}
+				});
+			}
+
+			global_animations.push({
+				section: "keywords-lookup",
+				selector: "#bitsy-1",
+				slide_num: 1,
+				animation_duration: "2s",
+				continuous: true,
+				keyframes: {
+					0:   { transform: "translateY(-40px)" },
+					100: { transform: "translateY(0)" },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: "#bitsy-3",
+				slide_num: 1,
+				animation_duration: "2s",
+				continuous: true,
+				keyframes: {
+					0:   { transform: "translateY(-180px)" },
+					100: { transform: "translateY(0)" },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: ".up-arr-1",
+				slide_num: 1,
+				animation_duration: "2s",
+				keyframes: {
+					0:   { "baseline-shift": "-10px" },
+					100: { "baseline-shift": 0 },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: ".bits-underscore, #bitsy-1-label, #bitsy-3-label",
+				slide_num: 1,
+				animation_duration: "2s",
+				keyframes: {
+					0:   { opacity: 0 },
+					100: { opacity: 1 },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: ".bits-underscore-2",
+				slide_num: 3,
+				animation_duration: "3s",
+				continuous: true,
+				keyframes: {
+					0:   { "letter-spacing": "-6px", opacity: 1 },
+					80:  { opacity: 0 },
+					100: { "letter-spacing": "-32px", opacity: 0 },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: ".bits-underscore-2-replacement",
+				slide_num: 3,
+				animation_duration: "3s",
+				continuous: true,
+				keyframes: {
+					0:   { "letter-spacing": "-32px" },
+					100: { "letter-spacing": "-6px" },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: "#bitsy-2, #bitsy-4, #bitsy-2-label, #bitsy-4-label",
+				slide_num: 2,
+				animation_duration: "2s",
+				continuous: true,
+				keyframes: {
+					0:   { opacity: 0 },
+					100: { opacity: 1 },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: "#bitsy-6, #bitsy-6-label",
+				slide_num: 4,
+				animation_duration: "2s",
+				continuous: true,
+				keyframes: {
+					0:   { opacity: 0 },
+					100: { opacity: 1 },
+				}
+			}, {
+				section: "keywords-lookup",
+				selector: "#bitsy-4, #bitsy-4-label, #bitsy-3, #bitsy-3-label, #bitsy-1, #bitsy-1-label",
+				slide_num: 4,
+				animation_duration: "0.5s",
+				continuous: true,
+				skip_auto_prev_state: true,
+				keyframes: {
+					0:   { opacity: 1, transform: "translateY(0)" },
+					100: { opacity: 0, transform: "translateY(0)" },
+				}
+			});
+		</script>
+	</g>
+
+	<g class="slide" id="vpmaddwd">
+		<!-- Source: https://en.wikichip.org/w/images/f/fa/vnni-vpdpwssd.svg -->
+
+
+		<svg xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:svg="http://www.w3.org/2000/svg" xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="425.48959mm" height="348.7843mm" viewBox="0 0 425.48959 348.7843" version="1.1" id="svg8" inkscape:version="0.92.2 (5c3e80d, 2017-08-06)" sodipodi:docname="vnni-vpdpwssd.svg" inkscape:export-filename="/home/david/upload/wikichip/intel/avx512-vnni/vnni-vpdpwssd.png" inkscape:export-xdpi="96" inkscape:export-ydpi="96">
+			<defs id="defs2">
+			  <marker inkscape:stockid="Arrow1Send" orient="auto" refY="0" refX="0" id="Arrow1Send" style="overflow:visible" inkscape:isstock="true">
+				<path id="path884" d="M 0,0 5,-5 -12.5,0 5,5 Z" style="fill:#0000ff;fill-opacity:1;fill-rule:evenodd;stroke:#0000ff;stroke-width:1.00000003pt;stroke-opacity:1" transform="matrix(-0.2,0,0,-0.2,-1.2,0)" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <marker inkscape:stockid="Arrow1Mend" orient="auto" refY="0" refX="0" id="Arrow1Mend" style="overflow:visible" inkscape:isstock="true">
+				<path id="path878" d="M 0,0 5,-5 -12.5,0 5,5 Z" style="fill:#fff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" transform="matrix(-0.4,0,0,-0.4,-4,0)" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <marker inkscape:stockid="StopL" orient="auto" refY="0" refX="0" id="marker3212" style="overflow:visible" inkscape:isstock="true">
+				<path inkscape:connector-curvature="0" id="path3210" d="M 0,5.65 V -5.65" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" transform="scale(0.8)"/>
+			  </marker>
+			  <marker inkscape:stockid="StopL" orient="auto" refY="0" refX="0" id="marker3172" style="overflow:visible" inkscape:isstock="true">
+				<path inkscape:connector-curvature="0" id="path3170" d="M 0,5.65 V -5.65" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" transform="scale(0.8)"/>
+			  </marker>
+			  <marker inkscape:isstock="true" style="overflow:visible" id="marker1377" refX="0" refY="0" orient="auto" inkscape:stockid="StopL" inkscape:collect="always">
+				<path transform="scale(0.8)" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" d="M 0,5.65 V -5.65" id="path1375" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <marker inkscape:isstock="true" style="overflow:visible" id="marker1349" refX="0" refY="0" orient="auto" inkscape:stockid="StopL" inkscape:collect="always">
+				<path transform="scale(0.8)" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" d="M 0,5.65 V -5.65" id="path1347" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <marker inkscape:stockid="StopL" orient="auto" refY="0" refX="0" id="marker1153" style="overflow:visible" inkscape:isstock="true" inkscape:collect="always">
+				<path id="path1151" d="M 0,5.65 V -5.65" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" transform="scale(0.8)" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <marker inkscape:stockid="StopL" orient="auto" refY="0" refX="0" id="StopL" style="overflow:visible" inkscape:isstock="true" inkscape:collect="always">
+				<path id="path1038" d="M 0,5.65 V -5.65" style="fill:#93ac93;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:1.00000003pt;stroke-opacity:1" transform="scale(0.8)" inkscape:connector-curvature="0"/>
+			  </marker>
+			  <linearGradient id="linearGradient829">
+				<stop id="stop825" offset="0" style="stop-color:#ffd42a;stop-opacity:1;"/>
+				<stop id="stop827" offset="1" style="stop-color:#ffd42a;stop-opacity:0.47109827"/>
+			  </linearGradient>
+			</defs>
+			<sodipodi:namedview id="base" pagecolor="#ffffff" bordercolor="#666666" borderopacity="1.0" inkscape:pageopacity="0.0" inkscape:pageshadow="2" inkscape:zoom="0.70710678" inkscape:cx="625.79424" inkscape:cy="831.01088" inkscape:document-units="mm" inkscape:current-layer="layer1" showgrid="false" inkscape:window-width="3200" inkscape:window-height="1727" inkscape:window-x="0" inkscape:window-y="0" inkscape:window-maximized="1" fit-margin-top="0" fit-margin-left="0" fit-margin-right="0" fit-margin-bottom="0"/>
+			<metadata id="metadata5">
+			  <rdf:RDF>
+				<cc:Work rdf:about="">
+				  <dc:format>image/svg+xml</dc:format>
+				  <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+				  <dc:title/>
+				</cc:Work>
+			  </rdf:RDF>
+			</metadata>
+			<g inkscape:label="Layer 1" inkscape:groupmode="layer" id="layer1" transform="translate(14.328383,8.8142056)">
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect815" width="22.754164" height="21.166666" x="41.804165" y="39.560417"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="1.9018323" y="11.031877" id="text819"><tspan sodipodi:role="line" id="tspan817" x="1.9018323" y="11.031877" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">VPMADDWD</tspan></text>
+			  <text id="text823" y="54.141449" x="0.60873717" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="54.141449" x="0.60873717" id="tspan821" sodipodi:role="line">SRC 1</tspan></text>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="0.60873717" y="96.47477" id="text827"><tspan sodipodi:role="line" id="tspan825" x="0.60873717" y="96.47477" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">SRC 2</tspan></text>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="46.594696" y="52.998039" id="text831"><tspan sodipodi:role="line" id="tspan829" x="46.594696" y="52.998039" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan833">0</tspan></tspan></text>
+			  <rect y="39.560413" x="64.558327" height="21.166666" width="22.754164" id="rect835" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text841" y="52.998039" x="69.348862" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="52.998039" x="69.348862" id="tspan839" sodipodi:role="line">A<tspan id="tspan837" style="font-size:64.99999762%;baseline-shift:sub">1</tspan></tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect843" width="22.754164" height="21.166666" x="87.312492" y="39.560413"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="92.103027" y="52.998039" id="text849"><tspan sodipodi:role="line" id="tspan847" x="92.103027" y="52.998039" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan845">2</tspan></tspan></text>
+			  <rect y="39.560413" x="132.82082" height="21.166666" width="54.504162" id="rect851" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text857" y="52.998039" x="149.98615" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="52.998039" x="149.98615" id="tspan855" sodipodi:role="line">. . .</tspan></text>
+			  <rect y="39.560413" x="187.32498" height="21.166666" width="22.754164" id="rect859" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text865" y="52.998039" x="189.70871" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="52.998039" x="189.70871" id="tspan863" sodipodi:role="line">A<tspan id="tspan861" style="font-size:64.99999762%;baseline-shift:sub">31</tspan></tspan></text>
+			  <path style="fill:#93ac93;fill-rule:evenodd;stroke:#fff;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#StopL);marker-end:url(#marker1153)" d="M 41.804163,23.685411 H 210.07915" id="path867" inkscape:connector-curvature="0" sodipodi:nodetypes="cc"/>
+			  <text id="text1211" y="21.760788" x="100.75248" style="font-size:7.61226606px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458335px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:normal;fill:#fff;stroke:none;stroke-width:0.26458335px" y="21.760788" x="100.75248" id="tspan1209" sodipodi:role="line">512-bit</tspan></text>
+			  <path inkscape:connector-curvature="0" id="path1345" d="M 41.804163,34.797912 H 64.688357" style="fill:#93ac93;fill-rule:evenodd;stroke:#fff;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#marker1349);marker-end:url(#marker1377)" sodipodi:nodetypes="cc"/>
+			  <text xml:space="preserve" style="font-size:7.61226606px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458335px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="41.733078" y="32.138699" id="text1999"><tspan sodipodi:role="line" id="tspan1997" x="41.733078" y="32.138699" style="font-weight:normal;fill:#fff;stroke:none;stroke-width:0.26458335px">16-bit</tspan></text>
+			  <rect y="81.893738" x="41.804165" height="21.166666" width="22.754164" id="rect2301" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text2307" y="95.33136" x="46.594696" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="95.33136" x="46.594696" id="tspan2305" sodipodi:role="line">B<tspan id="tspan2303" style="font-size:64.99999762%;baseline-shift:sub">0</tspan></tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2309" width="22.754164" height="21.166666" x="64.558334" y="81.893738"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="69.348862" y="95.33136" id="text2315"><tspan sodipodi:role="line" id="tspan2313" x="69.348862" y="95.33136" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">B<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan2311">1</tspan></tspan></text>
+			  <rect y="81.893738" x="87.312492" height="21.166666" width="22.754164" id="rect2317" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text2323" y="95.33136" x="92.103027" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="95.33136" x="92.103027" id="tspan2321" sodipodi:role="line">B<tspan id="tspan2319" style="font-size:64.99999762%;baseline-shift:sub">2</tspan></tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2325" width="54.504162" height="21.166666" x="132.82082" y="81.893738"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="149.98615" y="95.33136" id="text2329"><tspan sodipodi:role="line" id="tspan2327" x="149.98615" y="95.33136" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">. . .</tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2331" width="22.754164" height="21.166666" x="187.325" y="81.893738"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="189.70871" y="95.33136" id="text2337"><tspan sodipodi:role="line" id="tspan2335" x="189.70871" y="95.33136" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">B<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan2333">31</tspan></tspan></text>
+			  <text id="text2343" y="79.52684" x="48.9688" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="79.52684" x="48.9688" id="tspan2341" sodipodi:role="line">*</tspan></text>
+			  <text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="71.722961" y="79.52684" id="text2347"><tspan sodipodi:role="line" id="tspan2345" x="71.722961" y="79.52684" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">*</tspan></text>
+			  <text id="text2351" y="79.52684" x="94.477127" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="79.52684" x="94.477127" id="tspan2349" sodipodi:role="line">*</tspan></text>
+			  <text id="text2355" y="72.348038" x="149.98615" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="72.348038" x="149.98615" id="tspan2353" sodipodi:role="line">. . .</tspan></text>
+			  <text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="194.48961" y="79.52684" id="text2359"><tspan sodipodi:role="line" id="tspan2357" x="194.48961" y="79.52684" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">*</tspan></text>
+			  <text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="57.808975" y="120.93414" id="text2363"><tspan sodipodi:role="line" id="tspan2361" x="57.808975" y="120.93414" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">+</tspan></text>
+			  <text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="103.3173" y="120.93414" id="text2371"><tspan sodipodi:role="line" id="tspan2369" x="103.3173" y="120.93414" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">+</tspan></text>
+			  <rect y="39.560413" x="110.06666" height="21.166666" width="22.754164" id="rect2429" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text2435" y="52.998039" x="114.85719" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="52.998039" x="114.85719" id="tspan2433" sodipodi:role="line">A<tspan id="tspan2431" style="font-size:64.99999762%;baseline-shift:sub">3</tspan></tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2437" width="22.754164" height="21.166666" x="110.06667" y="81.893738"/>
+			  <text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="114.85719" y="95.33136" id="text2443"><tspan sodipodi:role="line" id="tspan2441" x="114.85719" y="95.33136" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">B<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan2439">3</tspan></tspan></text>
+			  <text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="117.23129" y="79.52684" id="text2447"><tspan sodipodi:role="line" id="tspan2445" x="117.23129" y="79.52684" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">*</tspan></text>
+			  <text id="text2837" y="120.93414" x="180.57564" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="120.93414" x="180.57564" id="tspan2835" sodipodi:role="line">+</tspan></text>
+			  <text id="text2841" y="143.57062" x="0.38887712" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="143.57062" x="0.38887712" id="tspan2839" sodipodi:role="line">DEST</tspan></text>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2843" width="45.508331" height="21.166666" x="41.804165" y="128.98958"/>
+			  <rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect2859" width="45.50832" height="21.166666" x="87.312492" y="128.98958"/>
+			  <rect y="128.98958" x="132.82082" height="21.166666" width="31.749998" id="rect2867" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text id="text2871" y="140.61055" x="138.60907" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="140.61055" x="138.60907" id="tspan2869" sodipodi:role="line">. . .</tspan></text>
+			  <rect y="128.98958" x="164.57083" height="21.166666" width="45.508347" id="rect2873" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+			  <text xml:space="preserve" style="font-size:6.25455332px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="46.806454" y="141.2397" id="text2849"><tspan sodipodi:role="line" id="tspan2847" x="46.806454" y="141.2397" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2889">0</tspan>B<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2901">0</tspan>+A<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2903">1</tspan>B<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2905">1</tspan></tspan></text>
+			  <text id="text2919" y="141.2397" x="92.336617" style="font-size:6.25455332px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="141.2397" x="92.336617" id="tspan2917" sodipodi:role="line">A<tspan id="tspan2909" style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px">2</tspan>B<tspan id="tspan2911" style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px">2</tspan>+A<tspan id="tspan2913" style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px">3</tspan>B<tspan id="tspan2915" style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px">3</tspan></tspan></text>
+			  <text xml:space="preserve" style="font-size:5.22903013px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="167.75725" y="140.9664" id="text2931"><tspan sodipodi:role="line" id="tspan2929" x="167.75725" y="140.9664" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:3.39886904px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2921">30</tspan>B<tspan style="font-size:3.39886904px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2923">30</tspan>+A<tspan style="font-size:3.39886904px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2925">31</tspan>B<tspan style="font-size:3.39886904px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan2927">31</tspan></tspan></text>
+			  <text id="text2968" y="175.07356" x="1.9018323" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"/>
+			  <path sodipodi:nodetypes="cc" style="fill:#93ac93;fill-rule:evenodd;stroke:#fff;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#marker3172);marker-end:url(#marker3212)" d="M 41.804163,156 H 87.310232" id="path3022" inkscape:connector-curvature="0"/>
+			  <text id="text3026" y="201.47205" x="53.172253" style="font-size:7.61226606px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458335px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:normal;fill:#fff;stroke:none;stroke-width:0.26458335px" y="165" x="53.172253" id="tspan3024" sodipodi:role="line">32-bit</tspan></text>
+
+			  <g id="g4724" transform="translate(-10.583333,-20.016113)">
+				<path inkscape:connector-curvature="0" id="path4588" d="m 315.01593,192.16323 5.75048,-3.61406 h -2.22301 v -11.85425 h -7.05494 v 11.85425 h -2.22299 z" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" sodipodi:nodetypes="cccccccc"/>
+				<path sodipodi:nodetypes="cccccccc" inkscape:connector-curvature="0" id="path4540" d="m 253.52755,144.74006 h 46.71014 l 14.77826,13.43876 14.77825,-13.43876 h 46.71012 l -27.47653,31.98277 H 281.0041 Z" style="fill:#8c0000;stroke:#fff;stroke-width:0.2822223"/>
+				<text id="text4544" y="171.60248" x="308.26657" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="171.60248" x="308.26657" id="tspan4542" sodipodi:role="line">+</tspan></text>
+				<path inkscape:connector-curvature="0" id="path4558" d="m 273.54167,144.74951 5.75048,-3.61406 h -2.22301 v -11.85426 h -7.05494 v 11.85426 h -2.223 z" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" sodipodi:nodetypes="cccccccc"/>
+				<path sodipodi:nodetypes="cccccccc" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" d="m 356.49018,144.74951 5.75047,-3.61406 h -2.22301 v -11.85426 h -7.05493 v 11.85426 h -2.223 z" id="path4560" inkscape:connector-curvature="0"/>
+				<rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect4492" width="22.754164" height="21.166666" x="239.57576" y="64.380661"/>
+				<text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="244.36629" y="77.818298" id="text4498"><tspan sodipodi:role="line" id="tspan4496" x="244.36629" y="77.818298" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan4494">0</tspan></tspan></text>
+				<rect y="64.380661" x="284.85342" height="21.166666" width="22.754164" id="rect4500" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+				<text id="text4506" y="77.818298" x="289.64395" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="77.818298" x="289.64395" id="tspan4504" sodipodi:role="line">B<tspan id="tspan4502" style="font-size:64.99999762%;baseline-shift:sub">0</tspan></tspan></text>
+				<path sodipodi:nodetypes="cccccccc" inkscape:connector-curvature="0" id="rect4957" d="m 237.35909,101.42231 h 27.48639 l 8.69621,11.75345 8.6962,-11.75345 h 27.48638 l -16.16845,27.9719 h -40.02827 z" style="fill:#c31111;stroke:#fff;stroke-width:0.2822223"/>
+				<text id="text4516" y="129.3132" x="269.32922" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="129.3132" x="269.32922" id="tspan4514" sodipodi:role="line">*</tspan></text>
+				<rect y="64.380661" x="322.52426" height="21.166666" width="22.754164" id="rect4518" style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"/>
+				<text id="text4524" y="77.818298" x="327.31479" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" xml:space="preserve"><tspan style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px" y="77.818298" x="327.31479" id="tspan4522" sodipodi:role="line">A<tspan id="tspan4520" style="font-size:64.99999762%;baseline-shift:sub">1</tspan></tspan></text>
+				<rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect4526" width="22.754164" height="21.166666" x="367.80194" y="64.380661"/>
+				<text xml:space="preserve" style="font-size:10.98227692px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="372.59247" y="77.818298" id="text4532"><tspan sodipodi:role="line" id="tspan4530" x="372.59247" y="77.818298" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">B<tspan style="font-size:64.99999762%;baseline-shift:sub" id="tspan4528">1</tspan></tspan></text>
+				<path style="fill:#c31111;stroke:#fff;stroke-width:0.2822223" d="m 320.3076,101.42231 h 27.48638 l 8.69621,11.75345 8.6962,-11.75345 h 27.48638 l -16.16845,27.9719 h -40.02827 z" id="path4534" inkscape:connector-curvature="0" sodipodi:nodetypes="cccccccc"/>
+				<text xml:space="preserve" style="font-size:16.11035156px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="352.27774" y="129.3132" id="text4538"><tspan sodipodi:role="line" id="tspan4536" x="352.27774" y="129.3132" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">*</tspan></text>
+				<path sodipodi:nodetypes="cccccccc" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" d="m 250.95284,101.19011 5.75048,-3.614057 h -2.22301 V 85.721799 h -7.05494 v 11.854254 h -2.223 z" id="path4953" inkscape:connector-curvature="0"/>
+				<path inkscape:connector-curvature="0" id="path4552" d="m 379.17903,101.19011 5.75048,-3.614057 H 382.7065 V 85.721799 h -7.05494 v 11.854254 h -2.223 z" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" sodipodi:nodetypes="cccccccc"/>
+				<path sodipodi:nodetypes="cccccccc" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" d="m 333.90135,101.19011 5.75048,-3.614057 h -2.22301 V 85.721799 h -7.05494 v 11.854254 h -2.223 z" id="path4554" inkscape:connector-curvature="0"/>
+				<path inkscape:connector-curvature="0" id="path4556" d="m 296.23052,101.19011 5.75048,-3.614057 h -2.22301 V 85.721799 h -7.05494 v 11.854254 h -2.223 z" style="fill:#aaaaff;fill-opacity:1;fill-rule:evenodd;stroke:#fff;stroke-width:0.05;stroke-miterlimit:4;stroke-dasharray:none" sodipodi:nodetypes="cccccccc"/>
+				<rect style="opacity:1;fill:#7a26f0;fill-opacity:1;stroke:#fff;stroke-width:0.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" id="rect4574" width="45.508331" height="21.166666" x="292.26175" y="192.5923"/>
+				<text xml:space="preserve" style="font-size:6.25455332px;line-height:1em;font-family:'DejaVu Sans';-inkscape-font-specification:'DejaVu Sans';letter-spacing:0px;word-spacing:0px;fill:#fff;stroke:none;stroke-width:0.26458332px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" x="297.26404" y="204.84242" id="text4586"><tspan sodipodi:role="line" id="tspan4584" x="297.26404" y="204.84242" style="font-weight:bold;fill:#fff;stroke:none;stroke-width:0.26458332px">A<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan4576">0</tspan>B<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan4578">0</tspan>+A<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan4580">1</tspan>B<tspan style="font-size:4.06545925px;baseline-shift:sub;stroke-width:0.26458332px" id="tspan4582">1</tspan></tspan></text>
+			  </g>
+			</g>
+		  </svg>
+	</g>
+
+	<g class="slide" id="end">
+		<text class="h2" x="960" y="525" text-anchor="middle" style="font-size: 150px; letter-spacing: 0.1px;">fin</text>
+	</g>
+</svg>
+
+<style>
+	#button-left, #button-right {
+		position: fixed;
+		font-size: 4rem;
+		font-family: 'Press Start 2P';
+		bottom: 1rem;
+		color: white;
+		text-align: center;
+		align-content: center;
+		height: 5rem;
+		width: 5rem;
+		padding: 0.5rem 0.85rem;
+		background: none;
+		border: none;
+	}
+
+	#button-left {
+		left: 0rem;
+	}
+
+	#button-right {
+		right: 0rem;
+	}
+
+	.code-star {
+		alignment-baseline: middle;
+	}
+
+	.code-block-label {
+		text-decoration: underline;
+		fill: rgb(80, 250, 123);
+	}
+
+	.code-builtin {
+		fill: rgb(139, 233, 253);
+	}
+
+	.code-num {
+		fill: rgb(189, 147, 249);
+	}
+
+	.code-type, .code-keyword, .code-symbol-1  {
+		fill: rgb(255, 121, 198);
+	}
+
+	.code-register {
+		fill: #b6c8ff;
+	}
+
+	.code-comment {
+		font-style: italic;
+		fill: #6272a4;
+	}
+
+	.code-type {
+		font-style: italic;
+	}
+
+	.code-string {
+		fill: #F1FA8C;
+	}
+
+	.code-space {
+		fill: rgb(98, 114, 164);
+	}
+
+	.bit-1 {
+		fill: #F1FA8C;
+	}
+
+	.line-of-code, .line-number, .bits, .label {
+		font-family: 'Iosevka', 'Press Start 2P', 'Courier New', Courier, monospace;
+		font-size: 64px;
+		letter-spacing: -6px;
+		fill: rgb(248, 248, 242)
+	}
+
+	.bits, .bits .code-type {
+		font-style: normal;
+	}
+
+	.line-number {
+		font-size: 45px;
+	}
+
+	.label {
+		font-size: 40px;
+		baseline-shift: 10px;
+		letter-spacing: -4px;
+	}
+
+
+	.code-func-name {
+		fill: rgb(80, 250, 123);
+	}
+
+	.code-instruction {
+		fill: rgb(255, 121, 198);
+	}
+
+	.code-keyword-asm {
+		fill: rgb(255, 184, 104);
+	}
+
+	.code-curly-0 { fill: rgb(248, 248, 242); }
+	.code-curly-1 { fill: rgb(255, 121, 198); }
+	.code-curly-2 { fill: rgb(139, 233, 253); }
+	.code-curly-3 { fill: rgb(80, 250, 123); }
+	.code-curly-4 { fill: rgb(189, 147, 249); }
+	.code-curly-5 { fill: rgb(255, 184, 104); }
+	.code-paren-0 { fill: rgb(248, 248, 242); }
+	.code-paren-1 { fill: #F1FA8C; }
+	.code-paren-2 { fill: rgb(255, 184, 104); }
+	.code-paren-3 { fill: rgb(255, 121, 198); }
+ 	.code-paren-4 { fill: rgb(189, 147, 249); }
+ 	.code-paren-5 { fill: rgb(139, 233, 253); }
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Bold-Italic.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Bold-Italic.woff') format('woff');
+		font-weight: 700;
+		font-style: italic;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Bold.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Bold.woff') format('woff');
+		font-weight: 700;
+		font-style: normal;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-ExtraBold-Italic.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-ExtraBold-Italic.woff') format('woff');
+		font-weight: 800;
+		font-style: italic;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-ExtraBold.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-ExtraBold.woff') format('woff');
+		font-weight: 800;
+		font-style: normal;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Italic.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Italic.woff') format('woff');
+		font-weight: 400;
+		font-style: italic;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Medium-Italic.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Medium-Italic.woff') format('woff');
+		font-weight: 500;
+		font-style: italic;
+		font-display: swap;
+	}
+
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Medium.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Medium.woff') format('woff');
+		font-weight: 500;
+		font-style: normal;
+		font-display: swap;
+	}
+	@font-face {
+		font-family: 'JetBrains Mono';
+		src: url('./fonts/JetBrainsMono/JetBrainsMono-Regular.woff2') format('woff2'),
+			url('./fonts/JetBrainsMono/JetBrainsMono-Regular.woff') format('woff');
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+	}
+</style>
+
+<button id="button-left" onclick="goBackward()">&lt;</button>
+
+<button id="button-right" onclick="goForward()">&gt;</button>
+
+<script>
+	const code_snippets = new Map();
+	code_snippets.set("title", "Intro to SIMD in Zig\nby Niles Salter (@Validark)");
+
+	function processRanges(ranges, joined_lines) {
+		return ranges
+			.reduce((a, [n, start, end]) =>
+				`${a.slice(0, start)}<tspan class="code-${n}">${a.slice(start, end).replaceAll(/ +/g, e => "&nbsp;".repeat(e.length))}</tspan>${a.slice(end)}`,
+				joined_lines
+			)
+			.split('\n');
+	}
+
+	function preprocess(slide_id, text, lang) {
+		let start_pos = text.indexOf("\n");
+		let end_pos = text.lastIndexOf("\n");
+
+		if (text.slice(0, start_pos + 1).trim() !== "")
+			start_pos = -1;
+
+		if (text.slice(end_pos, -1).trim() !== "")
+			end_pos = -1
+
+		let lines = text.slice(start_pos + 1, end_pos).split('\n').map(e => e.trimRight().replaceAll('\t', '    '));
+		const unnecessary_whitespace = lines.filter(e => e).reduce((a, c) => Math.min(a, c.length - c.trimLeft().length), Number.POSITIVE_INFINITY);
+		lines = lines.map(e => e.slice(unnecessary_whitespace));
+		code_snippets.set(slide_id, (code_snippets.get(slide_id) || "") + lines.join("\n"));
+		let curly_depth = 0;
+		let paren_depth = 0;
+
+
+		const joined_lines = lines.join('\n');
+
+		const ranges = new Array();
+
+		// for (; )
+		// for (let regex = /".+?"/g, cur = regex.exec(joined_lines); cur; cur = regex.exec(joined_lines));
+
+		// const meme = RegExp.prototype.exec.bind(/".+?"/g, joined_lines);
+		// joined_lines;
+
+		const in_match = new Array(joined_lines.length).fill(false);
+
+		if (lang === 'zig') {
+			for (const [regex, name] of [
+				[/"[^\n]+?"|'[^\n]+?'/g, "string"],
+				[/\/\/([^\n]+|$)/g, "comment"],
+			]) {
+				outer: for (const { index, 0: { length } } of joined_lines.matchAll(regex)) {
+					for (let q = 0; q < length; q++) if (in_match[index + q]) continue outer;
+					for (let q = 0; q < length; q++) in_match[index + q] = true;
+					ranges.push([name, index, index + length]);
+				}
+			}
+
+			for (const [regex, name] of [
+				[/(?<!\w)(usingnamespace|linksection|threadlocal|unreachable|addrspace|allowzero|nosuspend|anyframe|callconv|comptime|continue|errdefer|noinline|volatile|anytype|noalias|suspend|export|undefined|extern|inline|opaque|orelse|packed|false|true|resume|return|struct|switch|align|async|await|break|catch|const|defer|error|union|while|else|enum|test|and|asm|for|pub|try|var|fn|if|or)(?!\w)/g, "keyword"],
+				[/@\w+/g, "builtin"],
+				[/ +/g, "space"],
+				[/[:=]/g, "symbol-1"],
+				[/\w+(?=\()|(?<=fn )\w+/g, "func-name"],
+				[/[ui]\d+|void/g, "type"],
+				[/(?<!\w)-?\d+/g, "num"],
+				[/\*/g, "star"],
+			]) {
+				outer: for (const { index, 0: { length } } of joined_lines.matchAll(regex)) {
+					for (let q = 0; q < length; q++) if (in_match[index + q]) continue outer;
+					for (let q = 0; q < length; q++) in_match[index + q] = true;
+					ranges.push([name, index, index + length]);
+				}
+			}
+		} else if (lang === "asm") {
+			for (const [regex, name] of [
+				[/"[^\n]+?"|'[^\n]+?'/g, "string"],
+				[/;([^\n]+|$)/g, "comment"],
+			]) {
+				outer: for (const { index, 0: { length } } of joined_lines.matchAll(regex)) {
+					for (let q = 0; q < length; q++) if (in_match[index + q]) continue outer;
+					for (let q = 0; q < length; q++) in_match[index + q] = true;
+					ranges.push([name, index, index + length]);
+				}
+			}
+
+			for (const [regex, name] of [
+				[/ +/g, "space"],
+				[/\*/g, "star"],
+				[/(?<!\w)(?:[re]?[abcd]x|[abcd][hl]|[er]?[sb]p|[er]?[ds]i|r[89]|r1[0-5][bwd]?|[xyz]mm[0-9]|zmm[12][0-9]|[xy]mm1[0-5]|zmm3[01]|rip)(?!\w)/g, "register"],
+				// [/[:=]/g, "symbol-1"],
+				[/.LBB\d+_\d+/g, "block-label"],
+				[/(?<!\w)-?\d+/g, "num"],
+				[/(?<=call +)[_.\w]+/g, "func-name"],
+				[/(?<=\+ )[_.\w]+/g, "func-name"],
+				[/(?<=^|\n)[_.\w]+:/g, "func-name"],
+				[/(?<!\w)(qword|ptr|dword|byte|word|xmmword|ymmword|zmmword)(?!\w)/g, "keyword-asm"],
+				[/(?<=^[ \t]*|\n[ \t]*)\.?\w+/g, "instruction"],
+				]) {
+					if (name === "instruction") {
+						for (const x of joined_lines.matchAll(regex)) {
+							const { index, 0: { length } } = x;
+							console.log(index, length, x);
+						}
+					}
+
+				outer: for (const { index, 0: { length } } of joined_lines.matchAll(regex)) {
+					if (length === 0) throw new Error("bad news");
+					for (let q = 0; q < length; q++) if (in_match[index + q]) continue outer;
+					for (let q = 0; q < length; q++) in_match[index + q] = true;
+					ranges.push([name, index, index + length]);
+				}
+			}
+		}
+
+
+		// .replaceAll(//g, (_, pre, e) => `${pre}<tspan class="code-func-name">${e}</tspan>`)
+
+		for (const [regex, name, [opener, closer]] of [
+			[/[{}]/g, "curly", "{}"],
+			[/[()]/g, "paren", "()"],
+		]) {
+			outer: for (const { index, 0: { 0: e, length } } of joined_lines.matchAll(regex)) {
+				for (let q = 0; q < length; q++) if (in_match[index + q]) continue outer;
+				for (let q = 0; q < length; q++) in_match[index + q] = true;
+				if (e === closer) {
+					curly_depth--;
+				}
+
+				ranges.push([`${name}-${curly_depth % 6}`, index, index + length]);
+
+				if (e === opener) {
+					curly_depth++;
+				}
+			}
+		}
+
+		return [
+			processRanges(ranges.sort(([, a], [, b]) => b - a), joined_lines),
+			ranges
+		];
+	}
+
+	const container = document.getElementById("container");
+	const slide_elements = [...container.children];
+
+	const EmptyFunction = () => {};
+
+	const clicks = new Map();
+	const slidesById = new Map();
+	const pane_heights = new Map();
+
+	function recursivelyHandleChildren(child_state_transitions, child, current_click_num) {
+		for (const grandchild of child.children) {
+			let click = grandchild.getAttribute("click")
+			if (click !== null) {
+				grandchild.setAttribute("hidden", "");
+				const clicky = (click === "") ? ++current_click_num : parseInt(click) || 1;
+				child_state_transitions[clicky].push(() => grandchild.removeAttribute("hidden"));
+				child_state_transitions[clicky - 1].push(() => grandchild.setAttribute("hidden", ""));
+			}
+			current_click_num = recursivelyHandleChildren(child_state_transitions, grandchild, current_click_num);
+		}
+
+		return current_click_num;
+	}
+
+	function countClicks(child, state) {
+		for (const grandchild of child.children) {
+			let click = grandchild.getAttribute("click")
+			if (click !== null) {
+				grandchild.setAttribute("hidden", "");
+				const clicky = (click === "") ? ++state.current_click_num : parseInt(click) || 1;
+				if (clicky > state.max_click_num) state.max_click_num = clicky;
+			}
+			countClicks(grandchild, state);
+		}
+		return state;
+	}
+
+	for (const [i, child] of slide_elements.entries()) {
+		child.setAttribute("hidden", "");
+		const id = child.getAttribute("id");
+		if (id === null) throw new Error("Please add an ID to slide " + i + ` (after the slide with an id of "${slide_elements[i - 1].id}")`);
+
+		const click_attr = child.getAttribute("clicks");
+		const num_clicks = parseInt(click_attr?.split(",").length > 1 ? click_attr.split(",").length + 1 : click_attr) || (1 + countClicks(child, { current_click_num: 0, max_click_num: 0 }).max_click_num);
+		clicks.set(id, num_clicks);
+		slidesById.set(id, child);
+
+		const child_state_transitions = new Array(num_clicks).fill(0).map(() => []);
+		state_transitions.set(id, child_state_transitions);
+
+		child_state_transitions[0].push(() => {
+			child.removeAttribute("hidden")
+			if (i > 0) slide_elements[i - 1].setAttribute("hidden", "")
+			if (i < slide_elements.length - 1) slide_elements[i + 1].setAttribute("hidden", "")
+			container.setAttribute("viewBox", `0 0 1920 ${pane_heights.get(id) || 1080}`);
+		});
+
+		child_state_transitions[num_clicks - 1].push(() => {
+			child.removeAttribute("hidden")
+			if (i > 0) slide_elements[i - 1].setAttribute("hidden", "")
+			if (i < slide_elements.length - 1) slide_elements[i + 1].setAttribute("hidden", "")
+		});
+
+		recursivelyHandleChildren(child_state_transitions, child, 0)
+	}
+
+	const code_info = new Map();
+
+	let code_block_i = 0;
+
+	for (const codeblock of document.getElementsByClassName("code")) {
+		let codeblock_id = codeblock.getAttribute("id");
+		const x = +codeblock.getAttribute("x");
+		const y = +codeblock.getAttribute("y");
+		const steps = codeblock.getAttribute("steps");
+		const lang = codeblock.getAttribute("lang");
+		const width = +codeblock.getAttribute("width");
+		if (codeblock.getAttribute("height")) {
+			throw new Error("Height is not allowed on code block")
+		}
+		const line_height = +codeblock.getAttribute("line-height");
+		const line_num_indent = +codeblock.getAttribute("line-num-indent");
+		const hide_line_numbers = codeblock.hasAttribute("hide-line-numbers");
+
+		const line_indent = +codeblock.getAttribute("line-indent");
+		let slide = codeblock;
+		do slide = slide.parentNode; while (!slide.classList.contains("slide"));
+		const slide_id = slide.getAttribute("id");
+
+
+		const [lines, ranges] = preprocess(slide_id, codeblock.innerHTML, lang);
+
+		if (codeblock_id) {
+			code_info.set(codeblock_id, { x, y, width, line_height, line_num_indent, hide_line_numbers, line_indent, slide, ranges });
+		} else {
+			codeblock_id = `codeblock-${code_block_i++}`;
+			codeblock.setAttribute("id", codeblock_id);
+		}
+
+		if (lines.length > 0) {
+			let innerHTML = codeblock.hasAttribute("hide-background") ? '' : `<rect x="${x || 0}" y="${y || 0}" height="${y + (line_height*(codeblock.getAttribute("lines") || lines.length)) + 20}" width="${width}" fill="black"></rect>`;
+			innerHTML += lines.map((e, i) => `<text class="line-of-code" x="${x + line_indent}" y="${y + (line_height*(i+1))}">${e}</text>`).join('\n');
+
+			if (!hide_line_numbers)
+				innerHTML += lines.map((_, i) => `<text class="line-number" x="${x + line_num_indent}" y="${y + (line_height*(i+1)) - 1}" text-anchor="end">${i + 1}</text>`);
+
+			const extra_height = y + (line_height*(lines.length));
+
+			if (extra_height > 1080) {
+				pane_heights.set(slide_id, extra_height);
+
+				for (const body of document.getElementsByTagName("body")) {
+					body.insertAdjacentHTML("beforeend",
+`
+<style>
+#container[slide="${slide_id}"] {
+	height: ${extra_height / 10.80}%
+}
+</style>
+`);
+				}
+		}
+
+			codeblock.innerHTML = innerHTML;
+		}
+
+		if (steps) {
+			codeblock.insertAdjacentHTML("afterbegin", `<rect id="${codeblock_id}-rect" width="1920" fill="purple"></rect>`)
+			let last = 0;
+			let last_height = 0;
+			let last_y = 0;
+			Array.prototype.push.apply(global_animations, steps.split(",").map((av, i, k) => {
+				const isLast = k.length === i + 1;
+				let [v, num_lines] = av.split(":");
+				num_lines ||= '1';
+				const prev = last;
+
+				const next = last = Math.min(0, (-v + Math.max(1, 10 - num_lines)) * line_height);
+				const animation_duration = `${Math.max(0.2, Math.abs(next - prev) / 10000)}s`;
+				// console.log({ prev, next, animation_duration });
+				// console.log([v, y + (line_height*(v - 1)) + 10]);
+
+				const prev_height = last_height;
+				const next_height = last_height = `${line_height*(num_lines || 1) + line_height / 7}px`;
+
+				const prev_y = last_y;
+				const next_y = last_y = `${y + (line_height*(v - 1)) + line_height / 7}px`;
+
+				return [{
+					section: slide_id,
+					selector: "#" + codeblock_id,
+					slide_num: i + 1,
+					forward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { transform: `translateY(${prev}px)` },
+						100: { transform: `translateY(${next}px)` },
+					}
+				}, {
+					section: slide_id,
+					selector: "#" + codeblock_id,
+					slide_num: i,
+					backward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { transform: `translateY(${next}px)` },
+						100: { transform: `translateY(${prev}px)` },
+					}
+				}, {
+					section: slide_id,
+					selector: `#${codeblock_id}-rect`,
+					slide_num: i + 1,
+					forward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { height: prev_height, y: prev_y },
+						100: { height: next_height, y: next_y },
+					}
+				}, {
+					section: slide_id,
+					selector: `#${codeblock_id}-rect`,
+					slide_num: i,
+					backward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { height: next_height, y: next_y },
+						100: { height: prev_height, y: prev_y },
+					}
+				}, isLast && {
+					section: slide_id,
+					selector: `#${codeblock_id}-rect`,
+					slide_num: i + 1,
+					backward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { height: next_height, y: next_y },
+						100: { height: next_height, y: next_y },
+					}
+				}, isLast && {
+					section: slide_id,
+					selector: "#" + codeblock_id,
+					slide_num: i + 1,
+					backward_only: true,
+					skip_auto_prev_state: true,
+					animation_duration,
+					keyframes: {
+						0:   { transform: `translateY(${next}px)` },
+						100: { transform: `translateY(${next}px)` },
+					}
+				}];
+			}).flat())
+		}
+	}
+
+	for (const text of [...document.getElementsByTagName("text")]) {
+		const align = text.getAttribute("align");
+		if (align) {
+			const line = +text.getAttribute("line");
+			const info = code_info.get(align);
+
+			text.setAttribute("x", info.x + info.line_indent);
+			text.setAttribute("y", info.y + (info.line_height*(line+1)));
+
+			const label = text.getAttribute("label");
+
+			if (label) {
+				text.insertAdjacentHTML("beforebegin", `<text id="${text.getAttribute("id")}-label" class="label" text-anchor="end" x="${info.x + info.line_indent}" y="${info.y + (info.line_height*(line+1))}">${label}:&nbsp;</text>`)
+			}
+		}
+	}
+
+	for (const bits of document.getElementsByClassName("bits-auto-color")) {
+		bits.innerHTML = bits.innerHTML.replaceAll(/1+/g, e => `<tspan class="bit-1">${e}</tspan>`);
+	}
+
+	// const indexToChar = new Array(64).fill('').map((_, i) => i < 62 ? i < 36 ? i.toString(36) : (i - 26).toString(36).toUpperCase() : '&$'[i - 62]);
+
+
+	for (const bits of document.getElementsByClassName("bits-match-color")) {
+		const align = bits.getAttribute("align");
+		if (!align) throw new Error("bits-match-color must use the 'align' property to be paired up with something!")
+		const info = code_info.get(align);
+		bits.innerHTML = processRanges(info.ranges, bits.innerHTML).join('\n');
+	}
+
+	{
+		let i = 0;
+		for (const bits of document.getElementsByClassName("bits-match-color2")) {
+			const align = bits.getAttribute("align");
+			if (!align) throw new Error("bits-match-color2 must use the 'align' property to be paired up with something!")
+			const info = code_info.get(align);
+
+			const [smally] = bits.getElementsByClassName("bits-small")
+
+			for (const [kind, bottom, top] of info.ranges) {
+				if (bottom <= i && i < top) {
+					smally.classList.add("code-" + kind);
+					break;
+				}
+			}
+			// bits.innerHTML = processRanges(info.ranges, bits.innerHTML).join('\n');
+			i++;
+		}
+	}
+
+	for (const post_process of post_processes) post_process();
+
+	const all_styles = new Map();
+
+{
+	let i = 0;
+	let styles = new Array();
+	let prev_selector;
+	let prev_slide_num;
+	let prev_section;
+	const animations = new Array();
+
+	function getSelectorForInternal(ge, num_clicks) {
+		if (ge === num_clicks) throw new Error("num_clicks must be higher than the target click (clicks start at 0)")
+		let arr = [];
+		let y = ge;
+		for (; y % 10; y++) {
+			if (y >= num_clicks) return arr;
+			arr.push(`[click="${y}"]`);
+		}
+
+		let z = y;
+		let i = -1;
+		for (; z % 100; z += 10) {
+			if (z >= num_clicks) return arr;
+			if (z / 10 === ge) {
+				for (; z % 100; z += 10) {
+					if (z >= num_clicks) return arr;
+					arr[++i] = `[click^="${z / 10}"]`
+				}
+				break;
+			}
+			// console.log(arr.findIndex(v => v === `[click="${z / 10}"]`), `[click="${z / 10}"]`);
+			arr.push(`[click^="${z / 10}"]:not([click="${z / 10}"])`);
+		}
+
+		let q = z;
+		i = -1;
+		for (; z % 1000; z += 100) {
+			if (z >= num_clicks) return arr;
+			// console.log(z, ge)
+			if (z / 100 === ge) {
+				for (; z % 1000; z += 100) {
+					if (z >= num_clicks) return arr;
+					arr[++i] = `[click^="${z / 100}"]`
+				}
+				break;
+			}
+			// console.log(arr.findIndex(v => v === `[click="${z / 10}"]`), `[click="${z / 10}"]`);
+			for (let j = 0; j < 10; j++) {
+				const k = z / 10 + j;
+
+				arr.push(`[click^="${k}"]${ge <= k && k < num_clicks ? '' : `:not([click="${k}"])`}`);
+			}
+		}
+
+		return arr;
+	}
+
+	function getSelectorFor(ge, num_clicks) {
+		return `:is(${getSelectorForInternal(+ge, +num_clicks).join(", ")})`;
+	}
+
+	function getSelectorForRangeInternal(num_clicks, ge, lt) {
+		if (ge === num_clicks) throw new Error("num_clicks must be higher than the target click (clicks start at 0)")
+		let arr = [];
+		let y = ge;
+		for (; y % 10; y++) {
+			if (y >= num_clicks) return arr;
+			arr.push(`[click="${y}"]`);
+		}
+
+		let z = y;
+		let i = -1;
+		for (; z % 100; z += 10) {
+			if (z >= num_clicks) return arr;
+			if (z / 10 === ge) {
+				for (; z % 100; z += 10) {
+					if (z >= num_clicks) return arr;
+					arr[++i] = `[click^="${z / 10}"]`
+				}
+				break;
+			}
+			// console.log(arr.findIndex(v => v === `[click="${z / 10}"]`), `[click="${z / 10}"]`);
+			arr.push(`[click^="${z / 10}"]:not([click="${z / 10}"])`);
+		}
+
+		let q = z;
+		i = -1;
+		for (; z % 1000; z += 100) {
+			if (z >= num_clicks) return arr;
+			// console.log(z, ge)
+			if (z / 100 === ge) {
+				for (; z % 1000; z += 100) {
+					if (z >= num_clicks) return arr;
+					arr[++i] = `[click^="${z / 100}"]`
+				}
+				break;
+			}
+			// console.log(arr.findIndex(v => v === `[click="${z / 10}"]`), `[click="${z / 10}"]`);
+			for (let j = 0; j < 10; j++) {
+				const k = z / 10 + j;
+
+				arr.push(`[click^="${k}"]${ge <= k && k < num_clicks ? '' : `:not([click="${k}"])`}`);
+			}
+		}
+
+		return arr;
+	}
+
+	function getSelectorForRange(num_clicks, ge, lt) {
+		return `:is(${getSelectorForRangeInternal(+num_clicks, +ge, +lt).join(", ")})`;
+	}
+
+	console.log(getSelectorFor('5', '23'));
+	console.log(getSelectorFor('23', '33'));
+	console.log(getSelectorFor('20', '30'));
+
+	const elements_to_selectors = new Map();
+	const selectors_to_keyframes = new Map();
+
+	for (const { section = (() => { throw "Invalid section" })(), selector, slide_num, keyframes } of global_animations.filter(e => e)) {
+		const start_keyframe = keyframes[0];
+		const end_keyframe = keyframes[100];
+
+		for (const [, individual_selector] of selector.matchAll(/([^,]+?)(?:, ?|$)/g)) {
+			for (const element of document.querySelectorAll(individual_selector)) {
+				const old = elements_to_selectors.get(element);
+				if (old && old !== individual_selector) {
+					throw new Error("Cannot make an object peacefully coexist in two different classes/ids. Please use id's instead. Conflict between `" + individual_selector + "` and `" + old + "`");
+				} else {
+					elements_to_selectors.set(element, individual_selector);
+				}
+			}
+
+			let arr = selectors_to_keyframes.get(individual_selector);
+			if (arr === undefined) {
+				arr = new Array();
+				selectors_to_keyframes.set(individual_selector, arr);
+			}
+			arr.push({ slide_num, start_keyframe, end_keyframe });
+		}
+	}
+
+	for (const [i, v] of selectors_to_keyframes.entries()) {
+		let prev_slide_num = 0;
+
+		for (const { slide_num, start_keyframe, end_keyframe } of v.sort((a, b) => a.slide_num - b.slide_num)) {
+			prev_slide_num, slide_num, new Array(slide_num - prev_slide_num).fill().map((_, i) => i + prev_slide_num);
+			prev_slide_num = slide_num;
+		}
+	}
+
+	//
+	for (const { section, selector, slide_num, keyframes, animation_delay = '0s', animation_duration = '0s', skip_auto_prev_state = section === prev_section && selector === prev_selector, forward_only = false, backward_only = false, ease = false, linear = false, continuous = false } of global_animations.filter(e => e)) {
+		if (section !== (prev_section ?? section)) {
+			all_styles.set(prev_section, styles.join("\n"));
+			styles = new Array();
+		}
+		i += 1;
+		const keyframe_entries = Object.entries(keyframes).map(([a, b]) => [+a, b]).sort((a, b) => a[0] - b[0]);
+		if (keyframe_entries[0]?.[0] !== 0) throw "Missing keyframe 0";
+		if (keyframe_entries[keyframe_entries.length - 1]?.[0] !== 100) throw "Missing keyframe 100";
+
+		if (selector !== prev_selector || slide_num !== prev_slide_num) {
+			animations.length = 0;
+		}
+
+		const animation = `animation${i} ${animation_duration} ${linear ? "linear" : ease ? "ease" : "cubic-bezier(0.69, 0.02, 0.53, 1)"} ${animation_delay} 1 forwards normal`;
+		animations.push(animation)
+
+		let selectors = selector.split(',');
+
+		if (!skip_auto_prev_state) {
+			styles.push(`.slide#${section} ${selector} {
+		${Object.entries(keyframe_entries[0][1]).map(([a, b]) => `${a}: ${b};`).join("\n\t")}
+	}`);
+		}
+
+		// if (selector.startsWith('.')) {
+		// 	Array.prototype.push.apply(selectors, [...document.querySelectorAll(selector)].filter(x => x.id).map(x => `${selector}#${x.id}`));
+		// }
+
+		styles.push(`${selectors.map(selector => `.slide#${section}[${continuous ? 'fragment-' : 'click="'}${slide_num}${continuous ? '' : '"'}]${forward_only ? "[present-went-forward]" : backward_only ? "[present-went-backward]" : ""} ${selector}`).join(',\n')} {
+		animation: ${animations.join(",\n\t")};
+	}`);
+
+		if (!continuous) styles.push(`${selectors.map(selector => `.slide#${section}[fragment-${slide_num + 1}] ${selector}`).join(',\n')} {
+		${Object.entries(keyframe_entries[keyframe_entries.length - 1][1]).map(([a, b]) => `${a}: ${b};`).join("\n\t")}
+	}`);
+
+	// 	if (forward_only) styles.push(`${`${selectors.map(selector => `.slide#${section}[click="${slide_num}"][present-went-backward] ${selector}`).join(',\n')} {
+	// 	${Object.entries(keyframe_entries[keyframe_entries.length - 1][1]).map(([a, b]) => `${a}: ${b};`).join("\n\t")}
+	// }`}`);
+
+		styles.push(`@keyframes animation${i} {
+		${keyframe_entries.map(([a, b]) => `${a}% { ${Object.entries(b).map(([a, b]) => `${a}: ${b};`).join(" ")} }`).join("\n\t")}
+	}`);
+
+		if (forward_only) {
+			// console.log(styles[styles.length - 1]);
+		}
+
+		prev_selector = selector;
+		prev_slide_num = slide_num;
+		prev_section = section;
+	}
+
+	all_styles.set(prev_section, styles.join("\n"));
+
+	var styleSheet = document.createElement("style");
+	styleSheet.id = "slide-animations";
+	styleSheet.innerHTML = [...all_styles.values()].join('\n');
+	document.head.appendChild(styleSheet);
+}
+
+	const getStateFromURL = () => {
+		const slide_arg = window.location.href.split("#").pop();
+		const [slide_title, clicks_amt] = slide_arg.split("?");
+		let cur_slide = slide_title || slide_elements[0].id;
+		if (!clicks.has(cur_slide)) [[cur_slide]] = clicks;
+
+		return [
+			cur_slide,
+			(clicks_amt || "").startsWith("click=")
+			? Math.min(clicks.get(cur_slide) - 1, parseInt(clicks_amt.slice("click=".length)) || 0)
+			: 0
+		];
+	}
+
+	let [cur_slide, cur_click] = getStateFromURL();
+
+	const updateURL = () => window.location.href = "#" + cur_slide + (cur_click === 0 ? '' : `?click=${cur_click}`);
+
+	const updateContainerSlideAttribute = () => container.setAttribute("slide", cur_slide)
+
+
+	// window.onhashchange = function() {
+	// 	const targetState = getSlideFromURL();
+	// 	setState(targetState)
+	// };
+
+	function applyTransitions() {
+		const cur_slide_element = slidesById.get(cur_slide)
+		cur_slide_element.setAttribute("click", "" + cur_click);
+
+		for (let i = 0; i <= cur_click; i++) cur_slide_element.setAttribute(`fragment-${i}`, "");
+
+		const max_clicks = clicks.get(cur_slide);
+		for (let i = cur_click; ++i < max_clicks; ) cur_slide_element.removeAttribute(`fragment-${i}`);
+
+		for (const state_transition of state_transitions.get(cur_slide)[cur_click]) {
+			state_transition();
+		}
+		updateURL();
+	}
+
+	function applyStateTransitionsUpToCurrentClickInSlide() {
+		for (let i = 0; i <= cur_click; i++) {
+			for (const state_transition of state_transitions.get(cur_slide)[i]) {
+				state_transition();
+			}
+		}
+	}
+
+	function nextSlide() {
+		const cur_slide_element = slidesById.get(cur_slide);
+		for (let i = 0; i < cur_click; i++) {
+			cur_slide_element.removeAttribute(`fragment-${i}`);
+		}
+		cur_slide_element.removeAttribute("click");
+		cur_click = 0;
+
+
+		let wasPreviousCurrentSlide = false;
+		for (const [slide] of clicks) {
+			if (wasPreviousCurrentSlide) {
+				cur_slide = slide;
+				break;
+			}
+			wasPreviousCurrentSlide = cur_slide === slide;
+		}
+		updateContainerSlideAttribute();
+	}
+
+	function goForward() {
+		const old_slide = cur_slide;
+		const max_click = clicks.get(cur_slide) - 1;
+		cur_click++;
+		if (cur_click > max_click) {
+			nextSlide();
+		}
+		const old_slide_element = slidesById.get(old_slide);
+		old_slide_element.removeAttribute("present-went-backward");
+		if (old_slide !== cur_slide) old_slide_element.removeAttribute("present-went-forward");
+		slidesById.get(cur_slide).setAttribute("present-went-forward", "");
+		applyTransitions();
+	}
+
+	function prevSlide() {
+		slidesById.get(cur_slide).removeAttribute("click");
+		slidesById.get(cur_slide).removeAttribute("fragment-0");
+		let [[previous_slide]] = clicks
+		for (const [slide] of clicks) {
+			if (cur_slide === slide) break;
+			previous_slide = slide;
+		}
+		cur_slide = previous_slide;
+		cur_click = clicks.get(cur_slide) - 1;
+		applyStateTransitionsUpToCurrentClickInSlide();
+		updateContainerSlideAttribute();
+	}
+
+	function goBackward() {
+		const old_slide = cur_slide;
+
+		if (cur_click === 0) {
+			prevSlide();
+		} else {
+			cur_click--;
+		}
+
+		const old_slide_element = slidesById.get(old_slide);
+		old_slide_element.removeAttribute("present-went-forward");
+		if (old_slide !== cur_slide) old_slide_element.removeAttribute("present-went-backward");
+		slidesById.get(cur_slide).setAttribute("present-went-backward", "");
+
+		applyTransitions();
+	}
+
+	let is_control_depressed = false;
+
+	window.addEventListener("touchstart", () => document.querySelector("body").requestFullscreen({ navigationUI: "hide" }));
+
+	window.addEventListener("keyup", function (event) {
+		// Do nothing if the event was already processed
+		if (event.defaultPrevented) return;
+
+		switch (event.key) {
+		case "Control":
+			is_control_depressed = false;
+			break;
+		default:
+			return; // Quit when this doesn't handle the key event.
+		}
+	});
+
+	window.addEventListener("keydown", function (event) {
+		// Do nothing if the event was already processed
+		if (event.defaultPrevented) return;
+
+		switch (event.key) {
+		case "ArrowLeft":
+			goBackward();
+			break;
+		case "ArrowRight":
+			goForward();
+			break;
+		case "Control":
+			is_control_depressed = true;
+			break;
+		case 'c':
+			if (is_control_depressed) {
+				navigator.clipboard.writeText(code_snippets.get(cur_slide));
+			}
+		default:
+			return; // Quit when this doesn't handle the key event.
+		}
+
+		// Cancel the default action to avoid it being handled twice
+		event.preventDefault();
+	}, true);
+
+	applyTransitions();
+	applyStateTransitionsUpToCurrentClickInSlide();
+	updateContainerSlideAttribute();
+	slidesById.get(cur_slide).setAttribute("present-went-forward", "");
+</script>
+
+<style>
+	.bits-small {
+		font-size: 25px;
+		letter-spacing: -2px;
+		text-align: center;
+	}
+</style>
+
+</body>
+</html>

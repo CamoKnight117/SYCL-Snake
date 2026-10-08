@@ -2,12 +2,23 @@
 //! @author_handle  CamoKnight117
 //! @cart_title     sycl-snake
 //! @description    A snake game made for the SYCL Vancouver 2026 badge
-
 const std = @import("std");
 const cart = @import("cart-api");
 comptime {
     cart.export_start_code();
 }
+
+const black = defColor(0x000000);
+const white = defColor(0xffffff);
+const grey = defColor(0x777777);
+const red = defColor(0xf82828);
+//const dred = defColor(0x3e0000);
+const green = defColor(0x00ff00);
+const dgreen = defColor(0x003c00);
+const dgreen2 = defColor(0x006600);
+const blue = defColor(0x7777ff);
+const lblue = defColor(0x6690cb);
+//const purp = defColor(0x820eef);
 
 /// Custom panic handler: sends the message via cart.trace() then halts
 /// without @breakpoint() (which causes a silent HardFault and system reset).
@@ -23,16 +34,6 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
         }
     }
 }
-
-const black = defColor(0x000000);
-const white = defColor(0xffffff);
-const grey = defColor(0x777777);
-const red = defColor(0xf82828);
-//const dred = defColor(0x3e0000);
-const green = defColor(0x00ff00);
-const dgreen = defColor(0x003c00);
-const blue = defColor(0x7777ff);
-//const purp = defColor(0x820eef);
 
 //fn borrowed from space-shooter cart
 inline fn defColor(rgb: u24) cart.NeopixelColor {
@@ -131,10 +132,11 @@ const MapLocationType = enum {
     pip,
 };
 
-const map_width: u32 = 32; //map width in grid squares
-const map_height: u32 = 25; //map height in grid squares
+//Note: SYCL Badge screen width is 160 and height 128
+const map_width: u32 = 22; //map width in grid squares
+const map_height: u32 = 18; //map height in grid squares
 const map_size = map_width * map_height; //total grid squares
-const gridsquare_width: u32 = 5; //pixel width of grid squares
+const gridsquare_width: u32 = 7; //pixel width of grid squares
 // const start_pips = 2;
 // const max_pips = 10;
 var snake_1: Snake = undefined;
@@ -159,10 +161,10 @@ pub fn start() void {
         .tail_coord = .{ .x = 16, .y = 14 },
         .body_len = 3,
         .color_1 = green,
-        .color_2 = dgreen,
+        .color_2 = dgreen2,
         .color_eyes = red,
         .current_direction = .up,
-        .score = 0,
+        .score = 3,
     };
     addSnakeToMap();
 
@@ -176,6 +178,8 @@ pub fn start() void {
     cart.set_double_buffer_mode(.{ .clear_full_frame = rgb565(black) });
 
     mixer.start_audio();
+
+    playMenuHappySong();
 }
 
 fn addWallsToMap() void {
@@ -190,9 +194,9 @@ fn addWallsToMap() void {
 }
 
 fn addStartingPipsToMap() void {
-    map_grid[4][17] = MapLocationType.pip;
-    map_grid[19][7] = MapLocationType.pip;
-    map_grid[22][20] = MapLocationType.pip;
+    spawnPip();
+    spawnPip();
+    spawnPip();
 }
 
 fn addSnakeToMap() void {
@@ -241,21 +245,21 @@ fn addSnakeToMap() void {
 }
 
 var movementTick: u8 = 0;
-var movementTickMax: u8 = 20;
+var movementTickMax: u8 = 50;
 fn tickSnake() void {
-    if (cart.controls.up) {
+    if (cart.controls.up and snake_1.current_direction != .down) {
         snake_1.current_direction = .up;
     }
-    if (cart.controls.down) {
+    if (cart.controls.down and snake_1.current_direction != .up) {
         snake_1.current_direction = .down;
     }
-    if (cart.controls.left) {
+    if (cart.controls.left and snake_1.current_direction != .right) {
         snake_1.current_direction = .left;
     }
-    if (cart.controls.right) {
+    if (cart.controls.right and snake_1.current_direction != .left) {
         snake_1.current_direction = .right;
     }
-    movementTick += (snake_1.body_len / 10) + 1;
+    movementTick += @min((snake_1.body_len / 10) + 3, 5);
 
     if (movementTick > movementTickMax) {
         movementTick = 0;
@@ -263,8 +267,11 @@ fn tickSnake() void {
         switch (moveResult) {
             .collision => {
                 gameState = GameState.game_over;
+                playGameOverSadSong();
             },
-            .collected_pip => {},
+            .collected_pip => {
+                playCollectedPipTone();
+            },
             .normal => {},
             .err => {},
         }
@@ -273,9 +280,10 @@ fn tickSnake() void {
 
 var prng = std.Random.DefaultPrng.init(6428);
 const newRand = prng.random();
+var pipTotal: u16 = 3;
 fn spawnPip() void {
     var spawned: bool = false;
-    while (!spawned) {
+    while (!spawned and pipTotal < map_size / 2) {
         const randX = newRand.intRangeAtMost(u8, 1, map_width - 1);
         const randY = newRand.intRangeAtMost(u8, 1, map_height - 1);
         const locationType: MapLocationType = map_grid[randX][randY];
@@ -286,12 +294,12 @@ fn spawnPip() void {
     }
 }
 
-var pipTick: u16 = 0;
-var pipMax: u8 = 200;
+var pip_tick: u16 = 0;
+var pip_tick_max: u8 = 200;
 fn tickPips() void {
-    pipTick += 1;
-    if (pipTick > pipMax) {
-        pipTick = 0;
+    pip_tick += 1;
+    if (pip_tick > pip_tick_max) {
+        pip_tick = 0;
         spawnPip();
     }
 }
@@ -314,34 +322,34 @@ fn drawSnakeHead(x: i32, y: i32) void {
             cart.rect(.{
                 .x = x * gridsquare_width + 1,
                 .y = y * gridsquare_width + 1,
-                .width = 1,
-                .height = 1,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
             cart.rect(.{
-                .x = x * gridsquare_width + gridsquare_width - 2,
+                .x = x * gridsquare_width + gridsquare_width - 3,
                 .y = y * gridsquare_width + 1,
-                .width = 1,
-                .height = 1,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
         },
         .down => {
             cart.rect(.{
-                .x = x * gridsquare_width + gridsquare_width - 2,
-                .y = y * gridsquare_width + gridsquare_width - 2,
-                .width = 1,
-                .height = 1,
+                .x = x * gridsquare_width + gridsquare_width - 3,
+                .y = y * gridsquare_width + gridsquare_width - 3,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
             cart.rect(.{
                 .x = x * gridsquare_width + 1,
-                .y = y * gridsquare_width + gridsquare_width - 2,
-                .width = 1,
-                .height = 1,
+                .y = y * gridsquare_width + gridsquare_width - 3,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
@@ -349,35 +357,35 @@ fn drawSnakeHead(x: i32, y: i32) void {
         .left => {
             cart.rect(.{
                 .x = x * gridsquare_width + 1,
-                .y = y * gridsquare_width + gridsquare_width - 2,
-                .width = 1,
-                .height = 1,
+                .y = y * gridsquare_width + gridsquare_width - 3,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
             cart.rect(.{
                 .x = x * gridsquare_width + 1,
                 .y = y * gridsquare_width + 1,
-                .width = 1,
-                .height = 1,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
         },
         .right => {
             cart.rect(.{
-                .x = x * gridsquare_width + gridsquare_width - 2,
+                .x = x * gridsquare_width + gridsquare_width - 3,
                 .y = y * gridsquare_width + 1,
-                .width = 1,
-                .height = 1,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
             cart.rect(.{
-                .x = x * gridsquare_width + gridsquare_width - 2,
-                .y = y * gridsquare_width + gridsquare_width - 2,
-                .width = 1,
-                .height = 1,
+                .x = x * gridsquare_width + gridsquare_width - 3,
+                .y = y * gridsquare_width + gridsquare_width - 3,
+                .width = 2,
+                .height = 2,
                 .stroke_color = rgb565(snake_1.color_eyes),
                 .fill_color = rgb565(snake_1.color_eyes),
             });
@@ -460,7 +468,6 @@ fn collectedPip() void {
 }
 
 fn resetGame() void {
-    snake_1.score = 0;
     map_grid = std.mem.zeroes([map_width][map_height]MapLocationType);
     addWallsToMap();
     addStartingPipsToMap();
@@ -473,7 +480,7 @@ fn resetGame() void {
         .color_2 = dgreen,
         .color_eyes = red,
         .current_direction = .up,
-        .score = 0,
+        .score = 3,
     };
     addSnakeToMap();
 }
@@ -487,7 +494,7 @@ fn drawUi() void {
             .str = txt,
             .x = @intCast((cart.screen_width - cart.font_width * txt.len) / 2),
             .y = 10,
-            .text_color = rgb565(grey),
+            .text_color = rgb565(lblue),
         });
     }
 }
@@ -607,7 +614,7 @@ fn drawBanner() void {
         .str = bannerText,
         .x = @intFromFloat(bannerPos),
         .y = cart.screen_height - 24,
-        .text_color = rgb565(grey),
+        .text_color = rgb565(lblue),
     });
     bannerPos -= 0.233;
     if (bannerPos < -@as(f32, @floatFromInt(bannerWidth)))
@@ -677,6 +684,7 @@ pub fn update() void {
                 np.* = red;
             }
         }
+        drawGame(); //Still draw the game so players can see their last state :)
         drawUiGameEnd();
     } else {
         // SELECT+DOWN = intentional reset (avoids accidental resets from SELECT noise).
@@ -710,7 +718,7 @@ pub fn update() void {
         // }
         drawGame();
     }
-
+    tickMultitones();
     mixer.update();
 }
 
@@ -724,4 +732,185 @@ fn drawGame() void {
     drawMap();
     drawBanner();
     drawUi();
+}
+
+// - AUDIO - //
+
+//Chromatic scale for ease of song writing.
+const g3: u32 = 196;
+const a3b: u32 = 208;
+const a3: u32 = 220;
+const b3b: u32 = 234;
+const b3: u32 = 247;
+const c4: u32 = 262;
+const d4b: u32 = 278;
+const d4: u32 = 294;
+const e4b: u32 = 312;
+const e4: u32 = 330;
+const f4: u32 = 349;
+const g4b: u32 = 370;
+const g4: u32 = 392;
+const a4: u32 = 440;
+const b4: u32 = 494;
+const c5: u32 = 523;
+const d5: u32 = 587;
+const e5: u32 = 659;
+
+var multitones_buf: [20]MultiTone = undefined;
+var multitones_count: usize = 0;
+
+const MultiTone = struct {
+    loop: bool,
+    tones: []const Tone,
+    volume: u32,
+    flags: cart.mixer.ToneOptions.Flags,
+    current_tone: usize = 0,
+    current_tone_frame: u32 = 0,
+};
+
+pub const Tone = struct {
+    frequency: u32,
+    duration: u32,
+};
+
+const collected_pip_tones = [_]Tone{
+    .{ .frequency = c4, .duration = 3 },
+    .{ .frequency = g4, .duration = 3 },
+    .{ .frequency = c5, .duration = 3 },
+};
+
+const collected_pip_tones_with_speedup = [_]Tone{
+    .{ .frequency = c4, .duration = 3 },
+    .{ .frequency = g4, .duration = 3 },
+    .{ .frequency = c5, .duration = 3 },
+    .{ .frequency = c4, .duration = 3 },
+    .{ .frequency = c5, .duration = 3 },
+    .{ .frequency = c4, .duration = 3 },
+    .{ .frequency = c5, .duration = 3 },
+};
+
+const menu_happy_song = [_]Tone{
+    .{ .frequency = 0, .duration = 48 },
+    .{ .frequency = g4, .duration = 12 },
+    .{ .frequency = c4, .duration = 16 },
+    .{ .frequency = g4, .duration = 12 },
+    .{ .frequency = e4, .duration = 16 },
+    .{ .frequency = g4, .duration = 12 },
+    .{ .frequency = c4, .duration = 16 },
+    .{ .frequency = g4, .duration = 12 },
+    .{ .frequency = e4, .duration = 16 },
+    .{ .frequency = d4, .duration = 16 },
+    .{ .frequency = c4, .duration = 16 },
+    .{ .frequency = e4, .duration = 12 },
+    .{ .frequency = g4, .duration = 12 },
+    .{ .frequency = c5, .duration = 12 },
+};
+
+const game_over_sad_song = [_]Tone{
+    .{ .frequency = 0, .duration = 48 },
+    .{ .frequency = g3, .duration = 18 },
+    .{ .frequency = c4, .duration = 18 },
+    .{ .frequency = g3, .duration = 18 },
+    .{ .frequency = e4b, .duration = 18 },
+    .{ .frequency = g3, .duration = 18 },
+    .{ .frequency = c4, .duration = 18 },
+    .{ .frequency = g3, .duration = 18 },
+    .{ .frequency = b3, .duration = 18 },
+    .{ .frequency = g3, .duration = 18 },
+    .{ .frequency = c4, .duration = 32 },
+};
+
+fn playCollectedPipTone() void {
+    if (multitones_count == multitones_buf.len) {
+        return;
+    }
+
+    if (snake_1.score % 10 == 0) {
+        multitones_buf[multitones_count] = .{
+            .loop = false,
+            .tones = &collected_pip_tones_with_speedup,
+            .volume = 100,
+            .flags = .{
+                .channel = .pulse1,
+            },
+        };
+    } else {
+        multitones_buf[multitones_count] = .{
+            .loop = false,
+            .tones = &collected_pip_tones,
+            .volume = 100,
+            .flags = .{
+                .channel = .pulse1,
+            },
+        };
+    }
+
+    multitones_count += 1;
+}
+
+fn playMenuHappySong() void {
+    if (multitones_count == multitones_buf.len) {
+        return;
+    }
+    multitones_buf[multitones_count] = .{
+        .loop = false,
+        .tones = &menu_happy_song,
+        .volume = 100,
+        .flags = .{
+            .channel = .pulse1,
+        },
+    };
+    multitones_count += 1;
+}
+
+fn playGameOverSadSong() void {
+    if (multitones_count == multitones_buf.len) {
+        return;
+    }
+    multitones_buf[multitones_count] = .{
+        .loop = false,
+        .tones = &game_over_sad_song,
+        .volume = 100,
+        .flags = .{
+            .channel = .pulse1,
+        },
+    };
+    multitones_count += 1;
+}
+
+fn tickMultitones() void {
+    var mt_index: usize = 0;
+    while (mt_index < multitones_count) {
+        const mt = &multitones_buf[mt_index];
+        mt.current_tone_frame += 1;
+        if (mt.current_tone_frame > mt.tones[mt.current_tone].duration) {
+            mt.current_tone += 1;
+            mt.current_tone_frame = 1;
+            if (mt.current_tone >= mt.tones.len) {
+                if (mt.loop) {
+                    mt.current_tone = 0;
+                } else {
+                    std.mem.copyForwards(
+                        MultiTone,
+                        multitones_buf[mt_index .. multitones_count - 1],
+                        multitones_buf[mt_index + 1 .. multitones_count],
+                    );
+                    multitones_count -= 1;
+                    continue;
+                }
+            }
+        }
+        if (mt.current_tone_frame == 1) {
+            const t = &mt.tones[mt.current_tone];
+            if (t.frequency != 0) {
+                mixer.tone(.{
+                    .frequency = .{ .bits = t.frequency },
+                    .duration = @fromBackingInt(t.duration),
+                    .volume = mt.volume,
+                    .flags = mt.flags,
+                });
+            }
+        }
+        mt_index += 1;
+    }
 }
