@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SYCL Snake – Exploring ZIG at Software You Can Love 2026</title>
+  <meta name="author" content="Cam Knight aka camoknight117">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --accent: #f0a500;
+      --text: #fff;
+      --muted: #aaa;
+      --dim: #555;
+      --subtle: #ccc;
+      --background: #000;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: var(--background);
+      font-family: 'Press Start 2P', monospace;
+      color: var(--accent);
+      overflow: hidden;
+    }
+
+    .slide {
+      display: none;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0.5rem 1rem;
+      overflow: hidden;
+    }
+
+    .slide.active {
+      display: flex;
+    }
+
+    .nav {
+      position: fixed;
+      bottom: 1.8rem;
+      font-size: 2rem;
+      color: #fff;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: 'Press Start 2P', monospace;
+      z-index: 999;
+      padding: 0.4rem 0.8rem;
+      line-height: 1;
+      transition: opacity 0.2s;
+    }
+
+    .nav:hover {
+      opacity: 1 !important;
+    }
+
+    .nav-prev {
+      left: 1.5rem;
+    }
+
+    .nav-next {
+      right: 1.5rem;
+    }
+
+    .progress {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 1rem;
+      color: var(--dim);
+    }
+
+    h1 {
+      font-size: 5rem;
+      line-height: 1.5;
+      margin-bottom: 1.8rem;
+      letter-spacing: 0.05em;
+    }
+
+    h2 {
+      font-size: 2rem;
+      line-height: 2;
+      margin-bottom: 2rem;
+      padding-bottom: 0.7rem;
+      border-bottom: 2px solid var(--accent);
+      width: min(90vw, 1600px);
+      text-align: left;
+    }
+
+    h3 {
+      font-size: 1rem;
+      line-height: 1.8;
+      margin-bottom: 0.9rem;
+      color: #ffd080;
+    }
+
+    p {
+      font-size: 1rem;
+      line-height: 2.4;
+      margin-bottom: 0.8rem;
+    }
+
+    .subtitle {
+      font-size: 1rem;
+      color: var(--muted);
+      line-height: 2.2;
+      margin-top: 0.8rem;
+    }
+
+    .author {
+      font-size: 1rem;
+      color: #666;
+      margin-top: 2rem;
+    }
+
+    ul {
+      list-style: none;
+      text-align: left;
+    }
+
+    ul li {
+      font-size: 2rem;
+      line-height: 1.5;
+      margin-bottom: 1.3rem;
+      position: relative;
+    }
+
+    ul li::before {
+      content: '▶';
+      color: var(--accent);
+      font-size: 1.5rem;
+      padding-right: 0.5rem;
+      position: relative;
+      top: -0.2em;
+    }
+
+    .content {
+      width: min(90vw, 1600px);
+      max-width: 1600px;
+      text-align: left;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5rem;
+      text-align: left;
+      width: min(90vw, 1400px);
+    }
+
+    .four-col {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.2rem;
+      width: min(90vw, 1600px);
+    }
+
+    .box {
+      border: 2px solid var(--accent);
+      padding: 1.2rem 1rem;
+      text-align: center;
+      min-height: 170px;
+    }
+
+    .box h3 {
+      color: var(--accent);
+      margin-bottom: 0.8rem;
+    }
+
+    .box p {
+      color: var(--subtle);
+      line-height: 2.1;
+    }
+
+    .image-grid {
+      display: grid;
+      gap: 1.5rem;
+      width: min(90vw, 1500px);
+      align-items: stretch;
+    }
+
+    .image-grid.three {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .image-grid.two {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .image-grid.one {
+      grid-template-columns: minmax(280px, 800px);
+      justify-content: center;
+    }
+
+    .image-placeholder {
+      min-height: 250px;
+      border: 2px dashed var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    .image-placeholder.tall {
+      min-height: 380px;
+    }
+
+    .text-image {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+      gap: 3rem;
+      width: min(90vw, 1400px);
+      height: min(68vh, 720px);
+      min-height: 0;
+      align-items: stretch;
+      text-align: left;
+    }
+
+    .text-image > .content {
+      min-width: 0;
+      align-self: center;
+    }
+
+    .text-image > .image-placeholder {
+      min-height: 0;
+      height: 100%;
+    }
+
+    .image-column {
+      display: grid;
+      grid-template-rows: repeat(auto-fit, minmax(0, 1fr));
+      gap: 1rem;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .image-column .image-placeholder {
+      min-height: 0;
+      height: 100%;
+    }
+
+    .two-col > .image-placeholder {
+      min-height: 0;
+      height: min(68vh, 720px);
+    }
+
+    .feature-list {
+      width: min(90vw, 1200px);
+    }
+
+    .fin {
+      font-size: 5rem;
+    }
+
+    #title h1 {
+      font-size: 5rem;
+    }
+
+    @media (max-width: 1920px) {
+      .slide {
+        padding-left: 2vw;
+        padding-right: 2vw;
+      }
+
+      .two-col {
+        gap: 5vw;
+      }
+
+      .four-col {
+        gap: 1vw;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- SLIDE 1 : Title -->
+  <div class="slide active" id="title">
+    <h1>SYCL SNAKE</h1>
+    <div class="subtitle">
+      A game built for the SYCL<br>Software You Can Love 2026 Vancouver conference<br>Written in Zig
+    </div>
+    <div class="author">Cam Knight &nbsp;·&nbsp; SYCL Snake &nbsp;·&nbsp; 2026</div>
+  </div>
+
+  <!-- SLIDE 2 : Agenda -->
+  <div class="slide" id="agenda">
+    <h2>AGENDA</h2>
+    <div class="content">
+      <ul>
+        <li>What is Snake?</li>
+        <li>The Badge</li>
+        <li>SYCL Snake</li>
+        <li>Playing in the Simulator</li>
+        <li>Playing on the Badge</li>
+        <li>Potential Additional Features</li>
+        <li>FIN</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- SLIDE 3 : What is Snake? -->
+  <div class="slide" id="what-is-snake">
+    <h2>WHAT IS SNAKE?</h2>
+    <div class="text-image">
+      <div class="content">
+        <ul>
+          <li>Classic Snake gameplay</li>
+          <li>Core rules and objective</li>
+          <li>Why it is a great fit</li>
+        </ul>
+      </div>
+      <div class="image-column">
+        <div class="image-placeholder">IMAGE 1<br>Snake gameplay / history</div>
+        <div class="image-placeholder">IMAGE 2<br>Classic Snake reference</div>
+        <div class="image-placeholder">IMAGE 3<br>Snake concept / inspiration</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4 : The Badge -->
+  <div class="slide" id="badge">
+    <h2>THE BADGE</h2>
+    <div class="text-image">
+      <div class="content">
+        <ul>
+          <li>Hardware overview</li>
+          <li>Controls and display</li>
+          <li>Why the badge?</li>
+        </ul>
+      </div>
+      <div class="image-placeholder tall">IMAGE 1<br>Badge photo</div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5 : SYCL Snake -->
+  <div class="slide" id="sycl-snake">
+    <h2>SYCL SNAKE</h2>
+    <div class="text-image">
+      <div class="content">
+        <ul>
+          <li>Game concept</li>
+          <li>How it works</li>
+          <li>What makes it SYCL Snake?</li>
+        </ul>
+      </div>
+      <div class="image-column">
+        <div class="image-placeholder">IMAGE 1<br>Game / simulator screenshot</div>
+        <div class="image-placeholder">IMAGE 2<br>Architecture / code / hardware screenshot</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 6 : Playing in the Simulator -->
+  <div class="slide" id="simulator">
+    <h2>PLAYING IN THE SIMULATOR</h2>
+    <div class="text-image">
+      <div class="content">
+        <ul>
+          <li>How to launch</li>
+          <li>Controls</li>
+          <li>What to look for</li>
+        </ul>
+      </div>
+      <div class="image-placeholder tall">IMAGE PLACEHOLDER<br>Simulator screenshot</div>
+    </div>
+  </div>
+
+  <!-- SLIDE 7 : Playing on the Badge -->
+  <div class="slide" id="playing-badge">
+    <h2>PLAYING ON THE BADGE</h2>
+    <div class="two-col">
+      <div class="content">
+        <ul>
+          <li>Getting the game onto the badge</li>
+          <li>Controls</li>
+          <li>Playing the game</li>
+        </ul>
+      </div>
+      <div class="image-placeholder tall">IMAGE PLACEHOLDER<br>Gameplay on badge</div>
+    </div>
+  </div>
+
+  <!-- SLIDE 8 : Potential Additional Features -->
+  <div class="slide" id="features">
+    <h2>POTENTIAL ADDITIONAL FEATURES</h2>
+    <div class="four-col">
+      <div class="box">
+        <h3>FEATURE 1</h3>
+        <p>Add content here.</p>
+      </div>
+      <div class="box">
+        <h3>FEATURE 2</h3>
+        <p>Add content here.</p>
+      </div>
+      <div class="box">
+        <h3>FEATURE 3</h3>
+        <p>Add content here.</p>
+      </div>
+      <div class="box">
+        <h3>FEATURE 4</h3>
+        <p>Add content here.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 9 : FIN -->
+  <div class="slide" id="fin">
+    <div class="fin">FIN</div>
+  </div>
+
+  <button class="nav nav-prev" onclick="navigate(-1)" title="Previous (←)">‹</button>
+  <div class="progress" id="progress"></div>
+  <button class="nav nav-next" onclick="navigate(+1)" title="Next (→)">›</button>
+
+  <script>
+    const SLIDES = [
+      'title',
+      'agenda',
+      'what-is-snake',
+      'badge',
+      'sycl-snake',
+      'simulator',
+      'playing-badge',
+      'features',
+      'fin'
+    ];
+
+    let cur = 0;
+
+    function showSlide(idx) {
+      if (idx < 0 || idx >= SLIDES.length) return;
+
+      document.querySelectorAll('.slide')
+        .forEach(s => s.classList.remove('active'));
+
+      cur = idx;
+      document.getElementById(SLIDES[cur]).classList.add('active');
+      window.location.hash = SLIDES[cur];
+
+      document.getElementById('progress').textContent =
+        (cur + 1) + ' / ' + SLIDES.length;
+
+      document.querySelector('.nav-prev').style.opacity =
+        cur === 0 ? '0.15' : '0.65';
+
+      document.querySelector('.nav-next').style.opacity =
+        cur === SLIDES.length - 1 ? '0.15' : '0.65';
+    }
+
+    function navigate(dir) {
+      showSlide(cur + dir);
+    }
+
+    document.addEventListener('keydown', e => {
+      if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) {
+        e.preventDefault();
+        navigate(+1);
+      }
+
+      if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) {
+        e.preventDefault();
+        navigate(-1);
+      }
+
+      if (e.key === 'Home') showSlide(0);
+      if (e.key === 'End') showSlide(SLIDES.length - 1);
+    });
+
+    function loadFromHash() {
+      const hash = window.location.hash.replace('#', '');
+      const idx = SLIDES.indexOf(hash);
+      showSlide(idx >= 0 ? idx : 0);
+    }
+
+    window.addEventListener('hashchange', loadFromHash);
+    loadFromHash();
+  </script>
+
+</body>
+
+</html>
