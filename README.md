@@ -2,16 +2,10 @@
 
 **Classic Snake, written in Zig, running on custom conference hardware.**
 
-SYCL Snake is a game cartridge for the [Software You Can Love (SYCL) Vancouver 2026](https://github.com/ZigEmbeddedGroup/sycl-badge) conference badge. The badge is a handheld ARM board with a 160×128 color screen, a D-pad, five RGB LEDs, and a chiptune audio mixer. The game uses all of it: grid-based gameplay, a scrolling banner, LED light shows, and an original soundtrack built from scratch.
+SYCL Snake is a game for the [Software You Can Love (SYCL) Vancouver 2026](https://github.com/ZigEmbeddedGroup/sycl-badge) conference badge. The badge is a handheld ARM board with a 160×128 color screen, a D-pad, five RGB LEDs, and a chiptune audio mixer. The game uses all of it: grid-based gameplay, a scrolling banner, LED light shows, and an original soundtrack built from scratch.
 
-<!-- ═══════════════════ GIF PLACEHOLDER ═══════════════════
-  1. Record 5–10 seconds of gameplay, on the real badge or in the simulator.
-  2. Save it as media/sycl-snake-demo.gif (keep it under ~10 MB).
-  3. Delete this comment block, along with the screenshot fallback just below it.
-  4. Uncomment the line below.
 
-<p align="center"><img src="media/sycl-snake-demo.gif" alt="SYCL Snake gameplay on the SYCL badge" width="480"></p>
-═══════════════════════════════════════════════════════ -->
+<p align="center"><img src="PresentationForUtahZigOct8/images/sycl-snake-demo.gif" alt="SYCL Snake gameplay on the SYCL badge" width="480"></p>
 
 <p align="center">
   <img src="PresentationForUtahZigOct8/images/SYCLSnake2.png" alt="SYCL Snake 2.0 gameplay" width="420"><br>
@@ -81,12 +75,10 @@ A few design decisions I'm happy with:
 
 ## Controls
 
-| Input | Action |
+| Input (Badge) | Input (Sim) | Action |
 |---|---|
-| D-pad | Steer the snake |
-| START | Start a game / return to title after game over |
-| Hold SELECT + DOWN | Reset to the title screen mid-game |
-| SELECT + UP / DOWN | Toggle the LED "quiet mode" on the title screen |
+| D-pad | WASD | Steer the snake |
+| START | ENTER | Start a game / return to title after game over |
 
 ## Build & run
 
