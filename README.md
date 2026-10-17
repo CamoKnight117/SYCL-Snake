@@ -19,7 +19,7 @@ SYCL Snake is a game for the [Software You Can Love (SYCL) Vancouver 2026](https
 I presented SYCL Snake at the Utah Zig meetup, covering the design, the Zig code, and lessons from building for the badge.
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=B6z4a6GZqvY&t=228s">
+  <a href="https://www.youtube.com/watch?v=B6z4a6GZqvY&t=110s">
     <img src="https://img.youtube.com/vi/B6z4a6GZqvY/hqdefault.jpg" alt="SYCL Snake w/ Cam Knight, talk video" width="480">
   </a><br>
   <sub><i><a href="https://www.youtube.com/watch?v=B6z4a6GZqvY&t=228s">SYCL Snake w/ Cam Knight</a> on YouTube</i></sub>
