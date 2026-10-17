@@ -76,7 +76,7 @@ A few design decisions I'm happy with:
 ## Controls
 
 | Input (Badge) | Input (Sim) | Action |
-|---|---|
+|---|---|---|
 | D-pad | WASD | Steer the snake |
 | START | ENTER | Start a game / return to title after game over |
 
